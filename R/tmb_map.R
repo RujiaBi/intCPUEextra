@@ -78,20 +78,26 @@
            call. = FALSE)
     }
     
-    # Fix missing (t,flag) cells to 0 via map (NA => fixed at initial value 0)
-    map$flag_t_1 <- .map_matrix_partial_fix(parameters$flag_t_1, has_tf)
-    map$flag_t_2 <- .map_matrix_partial_fix(parameters$flag_t_2, has_tf)
-    
     # How many observed time points per flag column?
     n_time_per_flag <- colSums(has_tf > 0)
     estimable_flag  <- n_time_per_flag >= 2
+
+    keep_tf <- has_tf
+    if (any(!estimable_flag)) {
+      keep_tf[, !estimable_flag] <- FALSE
+    }
+
+    # Fix missing (t,flag) cells to 0 via map (NA => fixed at initial value 0).
+    # If a flag has <2 observed time points, its whole temporal column is fixed to 0.
+    map$flag_t_1 <- .map_matrix_partial_fix(parameters$flag_t_1, keep_tf)
+    map$flag_t_2 <- .map_matrix_partial_fix(parameters$flag_t_2, keep_tf)
     
     if (any(!estimable_flag)) {
       warning(
         sprintf(
           paste0(
             "Some flags have <2 time points (flags: %s). ",
-            "Their (t,flag) temporal deviations are not estimable and are fixed to 0 where missing via `has_tf`. ",
+            "Their entire temporal deviation columns are fixed to 0. ",
             "The global temporal SD is fixed only if NO flags have >=2 time points."
           ),
           paste(which(!estimable_flag), collapse = ", ")

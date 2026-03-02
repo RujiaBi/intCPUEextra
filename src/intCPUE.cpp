@@ -84,6 +84,10 @@ Type objective_function<Type>::operator() ()
   DATA_INTEGER(n_v); // Number of vessels (i.e., levels for the factor explaining overdispersion)
   DATA_INTEGER(n_f); // Number of flags (e.g., 0 = the reference, 1 = other 1, 2 = other 2, etc.)
   DATA_INTEGER(n_g); // Number of extrapolation-grid cells
+  DATA_INTEGER(use_vessel_effect);
+  DATA_INTEGER(use_q_diffs_system);
+  DATA_INTEGER(use_q_diffs_time);
+  DATA_INTEGER(use_q_diffs_spatial);
   
   // Data
   DATA_VECTOR(b_i); // Response (Positive CPUE, biomass / effort) for each observation
@@ -222,13 +226,15 @@ Type objective_function<Type>::operator() ()
     1   // share_range = 1 (skip range penalty here)
   );
   
-  nll_prior -= pc_prior_matern(
-    range_1, sigma_flag_1,
-    matern_range, matern_sigma_flag,
-    range_prob, sigma_prob,
-    1,  // give_log
-    1   // share_range = 1 (skip range penalty here)
-  );
+  if (use_q_diffs_spatial == 1) {
+    nll_prior -= pc_prior_matern(
+      range_1, sigma_flag_1,
+      matern_range, matern_sigma_flag,
+      range_prob, sigma_prob,
+      1,  // give_log
+      1   // share_range = 1 (skip range penalty here)
+    );
+  }
   
   nll_prior -= pc_prior_matern(
     range_2, sigma_0_2,
@@ -246,13 +252,15 @@ Type objective_function<Type>::operator() ()
     1   // share_range = 1 (skip range penalty here)
   );
   
-  nll_prior -= pc_prior_matern(
-    range_2, sigma_flag_2,
-    matern_range, matern_sigma_flag,
-    range_prob, sigma_prob,
-    1,  // give_log
-    1   // share_range = 1 (skip range penalty here)
-  );
+  if (use_q_diffs_spatial == 1) {
+    nll_prior -= pc_prior_matern(
+      range_2, sigma_flag_2,
+      matern_range, matern_sigma_flag,
+      range_prob, sigma_prob,
+      1,  // give_log
+      1   // share_range = 1 (skip range penalty here)
+    );
+  }
   
   
   // Need to parameterize H matrix such that det(H)=1 (preserving volume) 
@@ -278,27 +286,35 @@ Type objective_function<Type>::operator() ()
   }
    
   // Random vessel effect
-  for(int i=0; i<n_v; i++){
-    nll -= dnorm(ves_v_1(i), Type(0.0), ves_std_dev_1, true);
+  if (use_vessel_effect == 1) {
+    for(int i=0; i<n_v; i++){
+      nll -= dnorm(ves_v_1(i), Type(0.0), ves_std_dev_1, true);
+    }
   }
   
   // Differences in gear-speciafic catchability
-  for(int i=0; i<n_f-1; i++){
-    nll -= dnorm(flag_f_1(i), Type(0.0), flag_std_dev_1, true);
+  if (use_q_diffs_system == 1) {
+    for(int i=0; i<n_f-1; i++){
+      nll -= dnorm(flag_f_1(i), Type(0.0), flag_std_dev_1, true);
+    }
   }
 
   // Differences in gear-specific catchability over time
-  for(int j=0; j<n_f-1; j++){
-    for(int t=0; t<n_t; t++){
-      if (has_tf(t, j) == 1) {
-        nll -= dnorm(flag_t_1(t, j), Type(0.0), flag_t_std_dev_1, true);
+  if (use_q_diffs_time == 1) {
+    for(int j=0; j<n_f-1; j++){
+      for(int t=0; t<n_t; t++){
+        if (has_tf(t, j) == 1) {
+          nll -= dnorm(flag_t_1(t, j), Type(0.0), flag_t_std_dev_1, true);
+        }
       }
-	}
+    }
   }
   
   // Differences in gear-specific catchability over space
-  for(int i=0; i<n_f-1; i++){
-    nll += SCALE(GMRF(Q_1), 1./tau_flag_1)(flag_s_1.col(i));
+  if (use_q_diffs_spatial == 1) {
+    for(int i=0; i<n_f-1; i++){
+      nll += SCALE(GMRF(Q_1), 1./tau_flag_1)(flag_s_1.col(i));
+    }
   }
   
   
@@ -313,27 +329,35 @@ Type objective_function<Type>::operator() ()
   }
    
   // Random vessel effect
-  for(int i=0; i<n_v; i++){
-    nll -= dnorm(ves_v_2(i), Type(0.0), ves_std_dev_2, true);
+  if (use_vessel_effect == 1) {
+    for(int i=0; i<n_v; i++){
+      nll -= dnorm(ves_v_2(i), Type(0.0), ves_std_dev_2, true);
+    }
   }
 
   // Differences in gear-specific catchability
-  for(int i=0; i<n_f-1; i++){
-    nll -= dnorm(flag_f_2(i), Type(0.0), flag_std_dev_2, true);
+  if (use_q_diffs_system == 1) {
+    for(int i=0; i<n_f-1; i++){
+      nll -= dnorm(flag_f_2(i), Type(0.0), flag_std_dev_2, true);
+    }
   }
   
   // Differences in gear-specific catchability over time
-  for(int j=0; j<n_f-1; j++){
-    for(int t=0; t<n_t; t++){
-      if (has_tf(t, j) == 1) {
-        nll -= dnorm(flag_t_2(t, j), Type(0.0), flag_t_std_dev_2, true);
-	  }
+  if (use_q_diffs_time == 1) {
+    for(int j=0; j<n_f-1; j++){
+      for(int t=0; t<n_t; t++){
+        if (has_tf(t, j) == 1) {
+          nll -= dnorm(flag_t_2(t, j), Type(0.0), flag_t_std_dev_2, true);
+        }
+      }
     }
   }
   
   // Differences in gear-specific catchability over space
-  for(int i=0; i<n_f-1; i++){
-    nll += SCALE(GMRF(Q_2), 1./tau_flag_2)(flag_s_2.col(i));
+  if (use_q_diffs_spatial == 1) {
+    for(int i=0; i<n_f-1; i++){
+      nll += SCALE(GMRF(Q_2), 1./tau_flag_2)(flag_s_2.col(i));
+    }
   }
   
   
@@ -343,7 +367,7 @@ Type objective_function<Type>::operator() ()
   flag_t_mean_1.setZero();
   flag_t_mean_2.setZero();
 
-  if (n_f > 1) {
+  if (use_q_diffs_time == 1 && n_f > 1) {
     for (int j = 0; j < n_f - 1; j++) {
       Type sum1 = 0.0, sum2 = 0.0;
       Type cnt  = 0.0;
@@ -427,10 +451,10 @@ Type objective_function<Type>::operator() ()
 	st_effect_1(i) += Ais_x(r) * epsilon_st_1(s, t_id);
 	st_effect_2(i) += Ais_x(r) * epsilon_st_2(s, t_id);
 	
-	if(f_id > 0){
-	  flag_s_effect_1(i) += Ais_x(r) * flag_s_1(s, f_id-1);
-	  flag_s_effect_2(i) += Ais_x(r) * flag_s_2(s, f_id-1);
-	}
+    if (use_q_diffs_spatial == 1 && f_id > 0){
+      flag_s_effect_1(i) += Ais_x(r) * flag_s_1(s, f_id-1);
+      flag_s_effect_2(i) += Ais_x(r) * flag_s_2(s, f_id-1);
+    }
   }
   
   for(int i=0; i<n_i; i++){	
@@ -438,18 +462,22 @@ Type objective_function<Type>::operator() ()
 	int vid = v_i(i);
 	int fid = f_i(i);
 	
-    Type ves_effect_1 = ves_v_1(vid); 
+    Type ves_effect_1 = Type(0.0);
+    if (use_vessel_effect == 1) ves_effect_1 = ves_v_1(vid);
 	Type yq_effect_1 = yq_t_1(tid);
-	Type flag_effect_1 = (fid == 0) ? Type(0) : flag_f_1(fid-1);  // if fid=0，flag_effect_1 = 0
+	Type flag_effect_1 = Type(0.0);
+    if (use_q_diffs_system == 1 && fid > 0) flag_effect_1 = flag_f_1(fid-1);
 	
-    Type ves_effect_2 = ves_v_2(vid); 
+    Type ves_effect_2 = Type(0.0);
+    if (use_vessel_effect == 1) ves_effect_2 = ves_v_2(vid);
 	Type yq_effect_2 = yq_t_2(tid);
-	Type flag_effect_2 = (fid == 0) ? Type(0) : flag_f_2(fid-1);  // if fid=0，flag_effect_2 = 0
+	Type flag_effect_2 = Type(0.0);
+    if (use_q_diffs_system == 1 && fid > 0) flag_effect_2 = flag_f_2(fid-1);
 	
 	Type flag_t_effect_1 = Type(0);
     Type flag_t_effect_2 = Type(0);
 
-    if (fid > 0) {
+    if (use_q_diffs_time == 1 && fid > 0) {
       int j = fid - 1; // column index in flag_t
       // only apply if (t,flag) is observed; otherwise force 0
       if (has_tf(tid, j) == 1) {
@@ -533,6 +561,10 @@ Type objective_function<Type>::operator() ()
   // Reporting;
   REPORT(nll_prior);
   REPORT(nll_penalty);
+  REPORT(use_vessel_effect);
+  REPORT(use_q_diffs_system);
+  REPORT(use_q_diffs_time);
+  REPORT(use_q_diffs_spatial);
   REPORT(cpue_density);
   ADREPORT(link_total);
   return nll;

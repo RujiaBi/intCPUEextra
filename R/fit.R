@@ -65,6 +65,11 @@ intCPUE <- function(
   n_v <- data_tmb$n_v
   n_f <- data_tmb$n_f
   n_s <- data_tmb$spde$n_s
+
+  data_tmb$use_vessel_effect <- as.integer(vessel_effect == "on" && n_v > 0L)
+  data_tmb$use_q_diffs_system <- as.integer(q_diffs_system == "on" && n_f > 1L)
+  data_tmb$use_q_diffs_time <- as.integer(q_diffs_time == "on" && n_f > 1L)
+  data_tmb$use_q_diffs_spatial <- as.integer(q_diffs_spatial == "on" && n_f > 1L)
   
   # Smooth dims
   has_smooths <- isTRUE(data_tmb$has_smooths == 1L)

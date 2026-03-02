@@ -1,0 +1,12 @@
+calculate_area          Calculate equal-area size (km^2) for each
+                        lon/lat grid cell
+get_index               Get bias-corrected index and uncertainty from
+                        an intCPUE fit
+intCPUE                 Fit an integrated spatiotemporal CPUE
+                        standardization model
+make_data               Prepare data objects and mesh for intCPUE
+                        workflows
+make_mesh               Construct an SPDE mesh for intCPUE
+make_utm                Convert lon/lat to UTM coordinates with robust
+                        longitude handling
+plot.intCPUEmesh        Plot an intCPUE mesh

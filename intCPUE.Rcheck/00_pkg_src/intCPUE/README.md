@@ -1,0 +1,237 @@
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+# intCPUE <img src="man/figures/logo.png" align="right" height="136" alt="intCPUE logo" />
+
+> Integrated CPUE standardization with spatiotemporal models in TMB
+
+<!-- badges: start -->
+
+[![R-CMD-check](https://github.com/RujiaBi/intCPUE/workflows/R-CMD-check/badge.svg)](https://github.com/RujiaBi/intCPUE/actions)
+<!-- badges: end -->
+
+**intCPUE** is a TMB-based framework for integrated CPUE standardization
+across multiple fisheries or surveys, with optional preferential
+sampling correction (under development).
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Contact](#contact)
+- [Citation](#citation)
+- [Installation](#installation)
+- [Data structure](#data-structure)
+- [Coordinate projection](#coordinate-projection)
+- [Build spatial mesh](#build-spatial-mesh)
+- [Fit the model](#fit-the-model)
+- [Getting index with bias
+  correction](#getting-index-with-bias-correction)
+- [Next steps](#next-steps)
+
+## Overview
+
+The model supports:
+
+- spatiotemporal random fields via an SPDE mesh (using `fmesher`)
+
+- multiple fleets / surveys through catchability components
+
+- mgcv-style `s()` smooth terms parsed into mixed-effects from inside
+  TMB
+
+This is currently a Poisson-link delta model. At present, population
+density is affected only by temporal effects, spatial effects, and
+spatiotemporal effects. Smooth terms are not yet allowed to affect
+population density; they currently affect catchability only. More
+flexible model specifications will be added in future releases.
+
+Here provides a minimal workflow: install → data preparation →
+coordinate projection → mesh → model fitting → index extraction.
+
+## Contact
+
+For questions, suggestions, or collaboration, please contact:
+
+- **Rujia Bi** — <rbi@iattc.org>
+
+## Citation
+
+If you use **intCPUE** in your work, please cite it as software:
+
+> Bi, R. (2026). *intCPUE: Integrated CPUE standardization with TMB*. R
+> package (v0.1.0). <https://github.com/RujiaBi/intCPUE>.
+
+Once a paper or DOI is available, this section will be updated.
+
+## Installation (development version)
+
+``` r
+# install.packages("remotes")
+remotes::install_github("RujiaBi/intCPUE")
+```
+
+``` r
+library(intCPUE)
+```
+
+## Data structure
+
+An intCPUE model requires a data frame containing the following columns:
+
+- `cpue` — positive catch rate
+
+- `encounter` — encounter indicator (0 = zero catch, 1 = positive catch)
+
+- `lon`, `lat` — geographic coordinates
+
+- `vesid` — vessel ID (0-based)
+
+- `tid` — time index (0-based)
+
+- `flagid` — fishery / survey ID (0-based; 0 = reference fishery)
+
+These columns are required. Additional columns may be included as
+needed.
+
+``` r
+# Use `pcod` from `sdmTMB` as an example
+data_input <- data.frame(
+  "cpue" = pcod$density,
+  "encounter" = pcod$present,
+  "lon" = pcod$lon,
+  "lat" = pcod$lat,
+  "vesid" = 0,
+  "tid" = as.numeric(as.factor(pcod$year))-1,
+  "flagid" = 0,
+  "depth" = pcod$depth
+)
+```
+
+### Important
+
+- `vesid`, `tid` and `flagid` must be 0-based contiguous integers
+
+- `flagid` must use 0 as the reference fishery / survey
+
+## Coordinate projection (lon/lat → UTM)
+
+Longitude may be in either -180..180 or 0..360.
+
+`make_utm()` automatically:
+
+- detects longitude convention
+
+- selects an appropriate UTM zone
+
+- scales coordinates for numerical stability
+
+``` r
+utm <- make_utm(data_input, utm_zone = NULL, coord_scale = "auto")
+data_utm <- utm$data_utm
+```
+
+## Build spatial mesh
+
+The mesh must be constructed using the scaled projected coordinates:
+`utm_x_scale` and `utm_y_scale`
+
+### K-means mesh
+
+``` r
+mesh <- make_mesh(data_utm, xy_cols = c("utm_x_scale", "utm_y_scale"), type = "kmeans", n_knots = 50)
+plot(mesh)
+```
+
+### Cutoff mesh
+
+``` r
+mesh <- make_mesh(data_utm, xy_cols = c("utm_x_scale", "utm_y_scale"), type = "cutoff", cutoff = 0.1)
+plot(mesh)
+```
+
+### Tailor mesh
+
+``` r
+mesh <- make_mesh(data_utm, xy_cols = c("utm_x_scale", "utm_y_scale"), type = "tailored",
+    convex = -0.1,         # for a finer boundary
+    max.edge = c(0.5, 2),   # max triangle edge length; inner and outer meshes
+    offset = c(0.1, 0.5),  # inner and outer border widths
+    cutoff = 0.05)
+plot(mesh)
+```
+
+### Custom mesh
+
+``` r
+bnd <- INLA::inla.nonconvex.hull(cbind(data_utm$utm_x_scale, data_utm$utm_y_scale), convex = -0.1)
+mesh_inla <- INLA::inla.mesh.2d(
+  boundary = bnd,
+  max.edge = c(0.5, 2)
+)
+mesh <- make_mesh(data_utm, xy_cols = c("utm_x_scale", "utm_y_scale"), mesh = mesh_inla)
+plot(mesh)
+```
+
+## Fit the model
+
+``` r
+formula_1 <- "cpue ~ 1"
+formula_2 <- "cpue ~ 1 + s(depth)"
+```
+
+Interpretation of `~ 1`:
+
+Both encounter and positive components include:
+
+- fixed temporal effects (`tid`, as intercepts)
+
+- spatial random field (`omega`)
+
+- spatiotemporal random field (`epsilon`)
+
+``` r
+ncores <- 4
+mesh <- make_mesh(data_utm, xy_cols = c("utm_x_scale", "utm_y_scale"), type = "cutoff", cutoff = 0.1)
+fit <- intCPUE(
+  formula_2,
+  data = data_utm,
+  mesh = mesh,
+  vessel_effect = "off",  # "on" or "off", same in the following
+  q_diffs_system = "off",  
+  q_diffs_time = "off",  
+  q_diffs_spatial = "off", 
+  ncores = ncores
+)
+```
+
+### Catchability components
+
+- `q_diffs_system` — systematic catchability difference among fisheries
+  (i.e., factor effect)
+
+- `q_diffs_time` — time-varying catchability difference
+
+- `q_diffs_spatial` — spatial catchability difference
+
+For the reference fishery (`flagid = 0`), these are constrained to 0.
+
+## Getting index with bias correction
+
+``` r
+index <- get_index(fit)
+library(ggplot2)
+ggplot(index, aes(time, index)) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey90") +
+  geom_line(lwd = 1, colour = "grey30") +
+  labs(x = "Time", y = "Biomass")
+```
+
+## Next steps
+
+- more flexible settings on smooth terms
+
+- diagnostic and plotting functions
+
+- preferential sampling correction
+
+- length frequency part

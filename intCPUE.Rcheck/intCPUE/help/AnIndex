@@ -1,0 +1,10 @@
+.make_parameters_intCPUE	dot-make_parameters_intCPUE
+.prep_key_area	dot-prep_key_area
+calculate_area	calculate_area
+get_index	get_index
+infer_cellsize_deg	infer_cellsize_deg
+intCPUE	intCPUE
+make_data	make_data
+make_mesh	make_mesh
+make_utm	make_utm
+plot.intCPUEmesh	plot.intCPUEmesh
