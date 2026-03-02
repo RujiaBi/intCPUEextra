@@ -238,7 +238,7 @@ fit <- intCPUE(
 
 * `q_diffs_spatial` — spatial catchability difference
 
-For the reference fishery (`flagid = 0`), these are constrained to 0.
+For the reference fishery (`flagid = 0`), the `q_diffs_*` terms are constrained to 0.
 
 ### Observation error
 
