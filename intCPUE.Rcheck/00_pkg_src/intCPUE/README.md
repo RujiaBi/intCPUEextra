@@ -255,9 +255,6 @@ fit <- intCPUE(
 - `vessel_effect` — vessel-level random effect, modeled as
   $N(0, \sigma^2)$, affecting catchability
 
-- `obs_sd` — positive-catch lognormal observation SD, either shared
-  across flags (`"shared"`) or flag-specific (`"flag"`)
-
 - `q_diffs_system` — systematic catchability difference among fisheries
   (i.e., factor effect)
 
@@ -265,7 +262,15 @@ fit <- intCPUE(
 
 - `q_diffs_spatial` — spatial catchability difference
 
-For the reference fishery (`flagid = 0`), these are constrained to 0.
+For the reference fishery (`flagid = 0`), the `q_diffs_*` terms are constrained to 0.
+
+### Observation error
+
+- `obs_sd = "shared"` uses one lognormal observation SD across all
+  flags
+
+- `obs_sd = "flag"` estimates one lognormal observation SD for each
+  flag
 
 ## Getting index with bias correction
 

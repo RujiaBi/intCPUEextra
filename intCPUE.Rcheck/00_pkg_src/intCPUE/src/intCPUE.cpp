@@ -22,7 +22,8 @@ struct LOSM_t : vector<SparseMatrix<Type> > {
 // Bias corrected log-normal
 template<class Type>
 Type dlnorm_bc(const Type& x, const Type& meanlog, const Type& sdlog, int give_log = 0) {
-    Type adjusted_meanlog = meanlog - pow(sdlog, 2) / 2;
+    Type sd2 = sdlog * sdlog;
+    Type adjusted_meanlog = meanlog - sd2 / 2;
     Type logres = dnorm(log(x), adjusted_meanlog, sdlog, true) - log(x);
 	
     if (give_log)
@@ -297,16 +298,22 @@ Type objective_function<Type>::operator() ()
   }
   
   
-  // Need to parameterize H matrix such that det(H)=1 (preserving volume) 
+  const bool use_any_spde_1 = (use_pop_spatial == 1 || use_pop_spatiotemporal == 1 || use_q_diffs_spatial == 1);
+  const bool use_any_spde_2 = (use_pop_spatial == 1 || use_pop_spatiotemporal == 1 || use_q_diffs_spatial == 1);
+
+  // Need to parameterize H matrix such that det(H)=1 (preserving volume)
   // Note that H appears in (20) in Lindgren et al 2011
   matrix<Type> H(2,2);
-  H(0,0) = exp(ln_H_input(0));
-  H(1,0) = ln_H_input(1);
-  H(0,1) = ln_H_input(1);
-  H(1,1) = (1+ln_H_input(1)*ln_H_input(1)) / exp(ln_H_input(0));
-  
-  SparseMatrix<Type> Q_1 = Q_spde(spde, kappa_1, H); // Precision matrix
-  SparseMatrix<Type> Q_2 = Q_spde(spde, kappa_2, H); // Precision matrix
+  SparseMatrix<Type> Q_1;
+  SparseMatrix<Type> Q_2;
+  if (use_any_spde_1 || use_any_spde_2) {
+    H(0,0) = exp(ln_H_input(0));
+    H(1,0) = ln_H_input(1);
+    H(0,1) = ln_H_input(1);
+    H(1,1) = (1+ln_H_input(1)*ln_H_input(1)) / exp(ln_H_input(0));
+    if (use_any_spde_1) Q_1 = Q_spde(spde, kappa_1, H); // Precision matrix
+    if (use_any_spde_2) Q_2 = Q_spde(spde, kappa_2, H); // Precision matrix
+  }
   
   
   // Encounter probability
@@ -487,18 +494,20 @@ Type objective_function<Type>::operator() ()
     for (int s = 0; s < n_smooth; s++) {
       int k_s = Zs_catch(s).cols();
       int start = b_smooth_start_catch(s);
+      Type smooth_sd0 = exp(ln_smooth_sigma_catch(s, 0));
+      Type smooth_sd1 = exp(ln_smooth_sigma_catch(s, 1));
 
       vector<Type> beta0(k_s);
       for (int j = 0; j < k_s; j++) {
         beta0(j) = b_smooth_catch(start + j, 0);
-        nll -= dnorm(beta0(j), Type(0.0), exp(ln_smooth_sigma_catch(s, 0)), true);
+        nll -= dnorm(beta0(j), Type(0.0), smooth_sd0, true);
       }
       eta_smooth_catch_1 += Zs_catch(s) * beta0;
 
       vector<Type> beta1(k_s);
       for (int j = 0; j < k_s; j++) {
         beta1(j) = b_smooth_catch(start + j, 1);
-        nll -= dnorm(beta1(j), Type(0.0), exp(ln_smooth_sigma_catch(s, 1)), true);
+        nll -= dnorm(beta1(j), Type(0.0), smooth_sd1, true);
       }
       eta_smooth_catch_2 += Zs_catch(s) * beta1;
     }
@@ -515,11 +524,13 @@ Type objective_function<Type>::operator() ()
     for (int s = 0; s < n_smooth; s++) {
       int k_s = Zs_pop_i(s).cols();
       int start = b_smooth_start_pop(s);
+      Type smooth_sd0 = exp(ln_smooth_sigma_pop(s, 0));
+      Type smooth_sd1 = exp(ln_smooth_sigma_pop(s, 1));
 
       vector<Type> beta0(k_s);
       for (int j = 0; j < k_s; j++) {
         beta0(j) = b_smooth_pop(start + j, 0);
-        nll -= dnorm(beta0(j), Type(0.0), exp(ln_smooth_sigma_pop(s, 0)), true);
+        nll -= dnorm(beta0(j), Type(0.0), smooth_sd0, true);
       }
       eta_smooth_pop_i_1 += Zs_pop_i(s) * beta0;
       eta_smooth_pop_g_1 += Zs_pop_g(s) * beta0;
@@ -527,7 +538,7 @@ Type objective_function<Type>::operator() ()
       vector<Type> beta1(k_s);
       for (int j = 0; j < k_s; j++) {
         beta1(j) = b_smooth_pop(start + j, 1);
-        nll -= dnorm(beta1(j), Type(0.0), exp(ln_smooth_sigma_pop(s, 1)), true);
+        nll -= dnorm(beta1(j), Type(0.0), smooth_sd1, true);
       }
       eta_smooth_pop_i_2 += Zs_pop_i(s) * beta1;
       eta_smooth_pop_g_2 += Zs_pop_g(s) * beta1;
@@ -564,20 +575,41 @@ Type objective_function<Type>::operator() ()
     s_effect_2 = A_is * omega_s_2;
   }
   
-  for(int r=0; r<Ais_ij.rows(); r++){
-    int i = Ais_ij(r, 0);  // observation
-    int s = Ais_ij(r, 1);  // knot
-	int t_id = t_i(i);
-	int f_id = f_i(i);
+  if (use_pop_spatiotemporal == 1 && use_q_diffs_spatial == 1) {
+    for(int r=0; r<Ais_ij.rows(); r++){
+      int i = Ais_ij(r, 0);  // observation
+      int s = Ais_ij(r, 1);  // knot
+      int t_id = t_i(i);
+      int f_id = f_i(i);
+      Type a_is = Ais_x(r);
 
-    if (use_pop_spatiotemporal == 1) {
-	  st_effect_1(i) += Ais_x(r) * epsilon_st_1(s, t_id);
-	  st_effect_2(i) += Ais_x(r) * epsilon_st_2(s, t_id);
+      st_effect_1(i) += a_is * epsilon_st_1(s, t_id);
+      st_effect_2(i) += a_is * epsilon_st_2(s, t_id);
+
+      if (f_id > 0) {
+        flag_s_effect_1(i) += a_is * flag_s_1(s, f_id-1);
+        flag_s_effect_2(i) += a_is * flag_s_2(s, f_id-1);
+      }
     }
-	
-    if (use_q_diffs_spatial == 1 && f_id > 0){
-      flag_s_effect_1(i) += Ais_x(r) * flag_s_1(s, f_id-1);
-      flag_s_effect_2(i) += Ais_x(r) * flag_s_2(s, f_id-1);
+  } else if (use_pop_spatiotemporal == 1) {
+    for(int r=0; r<Ais_ij.rows(); r++){
+      int i = Ais_ij(r, 0);  // observation
+      int s = Ais_ij(r, 1);  // knot
+      int t_id = t_i(i);
+      Type a_is = Ais_x(r);
+      st_effect_1(i) += a_is * epsilon_st_1(s, t_id);
+      st_effect_2(i) += a_is * epsilon_st_2(s, t_id);
+    }
+  } else if (use_q_diffs_spatial == 1) {
+    for(int r=0; r<Ais_ij.rows(); r++){
+      int i = Ais_ij(r, 0);  // observation
+      int s = Ais_ij(r, 1);  // knot
+      int f_id = f_i(i);
+      if (f_id > 0) {
+        Type a_is = Ais_x(r);
+        flag_s_effect_1(i) += a_is * flag_s_1(s, f_id-1);
+        flag_s_effect_2(i) += a_is * flag_s_2(s, f_id-1);
+      }
     }
   }
   

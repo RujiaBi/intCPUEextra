@@ -22,7 +22,8 @@ struct LOSM_t : vector<SparseMatrix<Type> > {
 // Bias corrected log-normal
 template<class Type>
 Type dlnorm_bc(const Type& x, const Type& meanlog, const Type& sdlog, int give_log = 0) {
-    Type adjusted_meanlog = meanlog - pow(sdlog, 2) / 2;
+    Type sd2 = sdlog * sdlog;
+    Type adjusted_meanlog = meanlog - sd2 / 2;
     Type logres = dnorm(log(x), adjusted_meanlog, sdlog, true) - log(x);
 	
     if (give_log)
@@ -223,16 +224,30 @@ Type objective_function<Type>::operator() ()
   
   // SPDE hyper transforms
   Type kappa_1 = sqrt(Type(8.0)) / range_1;
-  Type tau_0_1 = Type(1.0) / (Type(2.0)*sqrt(M_PI)*kappa_1*sigma_0_1);
-  Type tau_t_1 = Type(1.0) / (Type(2.0)*sqrt(M_PI)*kappa_1*sigma_t_1);
-  Type tau_flag_1 = Type(1.0) / (Type(2.0)*sqrt(M_PI)*kappa_1*sigma_flag_1);
   Type kappa_2 = sqrt(Type(8.0)) / range_2;
-  Type tau_0_2 = Type(1.0) / (Type(2.0)*sqrt(M_PI)*kappa_2*sigma_0_2);
-  Type tau_t_2 = Type(1.0) / (Type(2.0)*sqrt(M_PI)*kappa_2*sigma_t_2);
-  Type tau_flag_2 = Type(1.0) / (Type(2.0)*sqrt(M_PI)*kappa_2*sigma_flag_2);
-  
-  // PC‐priors
   int share_range_1 = 0;
+  int share_range_2 = 0;
+  
+  const bool use_any_spde_1 = (use_pop_spatial == 1 || use_pop_spatiotemporal == 1 || use_q_diffs_spatial == 1);
+  const bool use_any_spde_2 = (use_pop_spatial == 1 || use_pop_spatiotemporal == 1 || use_q_diffs_spatial == 1);
+
+  // Need to parameterize H matrix such that det(H)=1 (preserving volume)
+  // Note that H appears in (20) in Lindgren et al 2011
+  matrix<Type> H(2,2);
+  SparseMatrix<Type> Q_1;
+  SparseMatrix<Type> Q_2;
+  if (use_any_spde_1 || use_any_spde_2) {
+    H(0,0) = exp(ln_H_input(0));
+    H(1,0) = ln_H_input(1);
+    H(0,1) = ln_H_input(1);
+    H(1,1) = (1+ln_H_input(1)*ln_H_input(1)) / exp(ln_H_input(0));
+    if (use_any_spde_1) Q_1 = Q_spde(spde, kappa_1, H); // Precision matrix
+    if (use_any_spde_2) Q_2 = Q_spde(spde, kappa_2, H); // Precision matrix
+  }
+  
+  
+  // Encounter probability
+  // Time-constant SPDE (Omega)
   if (use_pop_spatial == 1) {
     nll_prior -= pc_prior_matern(
       range_1, sigma_0_1,
@@ -242,7 +257,12 @@ Type objective_function<Type>::operator() ()
       share_range_1
     );
     share_range_1 = 1;
+
+    Type tau_0_1 = Type(1.0) / (Type(2.0) * sqrt(M_PI) * kappa_1 * sigma_0_1);
+    nll += SCALE(GMRF(Q_1), 1. / tau_0_1)(omega_s_1);
   }
+
+  // Time-varying SPDE (Epsilon)
   if (use_pop_spatiotemporal == 1) {
     nll_prior -= pc_prior_matern(
       range_1, sigma_t_1,
@@ -252,19 +272,69 @@ Type objective_function<Type>::operator() ()
       share_range_1
     );
     share_range_1 = 1;
+
+    Type tau_t_1 = Type(1.0) / (Type(2.0) * sqrt(M_PI) * kappa_1 * sigma_t_1);
+    if (use_pop_spatiotemporal_rw == 1) {
+      nll += SCALE(GMRF(Q_1), 1. / tau_t_1)(epsilon_st_1.col(0)); // t=0
+      for (int t = 1; t < n_t; t++) {
+        nll += SCALE(GMRF(Q_1), 1. / tau_t_1)(epsilon_st_1.col(t) - epsilon_st_1.col(t - 1));
+      }
+    } else if (use_pop_spatiotemporal_ar1 == 1) {
+      nll += SCALE(GMRF(Q_1), 1. / (tau_t_1 * sqrt(Type(1.0) - rho_1 * rho_1)))(epsilon_st_1.col(0));
+      for (int t = 1; t < n_t; t++) {
+        nll += SCALE(GMRF(Q_1), 1. / tau_t_1)(epsilon_st_1.col(t) - rho_1 * epsilon_st_1.col(t - 1));
+      }
+    } else {
+      for (int t = 0; t < n_t; t++) {
+        nll += SCALE(GMRF(Q_1), 1. / tau_t_1)(epsilon_st_1.col(t));
+      }
+    }
   }
-  if (use_q_diffs_spatial == 1) {
-    nll_prior -= pc_prior_matern(
-      range_1, sigma_flag_1,
-      matern_range, matern_sigma_flag,
-      range_prob, sigma_prob,
-      1,
-      share_range_1
-    );
-    share_range_1 = 1;
+   
+  // Random vessel effect
+  if (use_vessel_effect == 1) {
+    for(int i=0; i<n_v; i++){
+      nll -= dnorm(ves_v_1(i), Type(0.0), ves_std_dev_1, true);
+      nll -= dnorm(ves_v_2(i), Type(0.0), ves_std_dev_2, true);
+    }
+  }
+  
+  // Differences in gear-specific catchability
+  if (use_q_diffs_system == 1) {
+    for(int i=0; i<n_f-1; i++){
+      nll -= dnorm(flag_f_1(i), Type(0.0), flag_std_dev_1, true);
+      nll -= dnorm(flag_f_2(i), Type(0.0), flag_std_dev_2, true);
+    }
   }
 
-  int share_range_2 = 0;
+  // Differences in gear-specific catchability over time
+  vector<Type> flag_t_mean_1(n_f - 1);
+  vector<Type> flag_t_mean_2(n_f - 1);
+  flag_t_mean_1.setZero();
+  flag_t_mean_2.setZero();
+
+  if (use_q_diffs_time == 1) {
+    for(int j=0; j<n_f-1; j++){
+      Type sum1 = 0.0, sum2 = 0.0;
+      Type cnt = 0.0;
+      for(int t=0; t<n_t; t++){
+        if (has_tf(t, j) == 1) {
+          nll -= dnorm(flag_t_1(t, j), Type(0.0), flag_t_std_dev_1, true);
+          nll -= dnorm(flag_t_2(t, j), Type(0.0), flag_t_std_dev_2, true);
+          sum1 += flag_t_1(t, j);
+          sum2 += flag_t_2(t, j);
+          cnt += 1.0;
+        }
+      }
+      if (cnt > 0.0) {
+        flag_t_mean_1(j) = sum1 / cnt;
+        flag_t_mean_2(j) = sum2 / cnt;
+      }
+    }
+  }
+  
+  // Positive catch
+  // Time-constant SPDE (Omega)
   if (use_pop_spatial == 1) {
     nll_prior -= pc_prior_matern(
       range_2, sigma_0_2,
@@ -274,7 +344,12 @@ Type objective_function<Type>::operator() ()
       share_range_2
     );
     share_range_2 = 1;
+
+    Type tau_0_2 = Type(1.0) / (Type(2.0) * sqrt(M_PI) * kappa_2 * sigma_0_2);
+    nll += SCALE(GMRF(Q_2), 1. / tau_0_2)(omega_s_2);
   }
+  
+  // Time-varying SPDE (Epsilon)
   if (use_pop_spatiotemporal == 1) {
     nll_prior -= pc_prior_matern(
       range_2, sigma_t_2,
@@ -284,8 +359,35 @@ Type objective_function<Type>::operator() ()
       share_range_2
     );
     share_range_2 = 1;
+
+    Type tau_t_2 = Type(1.0) / (Type(2.0) * sqrt(M_PI) * kappa_2 * sigma_t_2);
+    if (use_pop_spatiotemporal_rw == 1) {
+      nll += SCALE(GMRF(Q_2), 1. / tau_t_2)(epsilon_st_2.col(0)); // t=0
+      for (int t = 1; t < n_t; t++) {
+        nll += SCALE(GMRF(Q_2), 1. / tau_t_2)(epsilon_st_2.col(t) - epsilon_st_2.col(t - 1));
+      }
+    } else if (use_pop_spatiotemporal_ar1 == 1) {
+      nll += SCALE(GMRF(Q_2), 1. / (tau_t_2 * sqrt(Type(1.0) - rho_2 * rho_2)))(epsilon_st_2.col(0));
+      for (int t = 1; t < n_t; t++) {
+        nll += SCALE(GMRF(Q_2), 1. / tau_t_2)(epsilon_st_2.col(t) - rho_2 * epsilon_st_2.col(t - 1));
+      }
+    } else {
+      for (int t = 0; t < n_t; t++) {
+        nll += SCALE(GMRF(Q_2), 1. / tau_t_2)(epsilon_st_2.col(t));
+      }
+    }
   }
+
+  // Differences in gear-specific catchability over space
   if (use_q_diffs_spatial == 1) {
+    nll_prior -= pc_prior_matern(
+      range_1, sigma_flag_1,
+      matern_range, matern_sigma_flag,
+      range_prob, sigma_prob,
+      1,
+      share_range_1
+    );
+    share_range_1 = 1;
     nll_prior -= pc_prior_matern(
       range_2, sigma_flag_2,
       matern_range, matern_sigma_flag,
@@ -294,164 +396,15 @@ Type objective_function<Type>::operator() ()
       share_range_2
     );
     share_range_2 = 1;
-  }
-  
-  
-  // Need to parameterize H matrix such that det(H)=1 (preserving volume) 
-  // Note that H appears in (20) in Lindgren et al 2011
-  matrix<Type> H(2,2);
-  H(0,0) = exp(ln_H_input(0));
-  H(1,0) = ln_H_input(1);
-  H(0,1) = ln_H_input(1);
-  H(1,1) = (1+ln_H_input(1)*ln_H_input(1)) / exp(ln_H_input(0));
-  
-  SparseMatrix<Type> Q_1 = Q_spde(spde, kappa_1, H); // Precision matrix
-  SparseMatrix<Type> Q_2 = Q_spde(spde, kappa_2, H); // Precision matrix
-  
-  
-  // Encounter probability
-  // Time-constant SPDE (Omega)
-  if (use_pop_spatial == 1) {
-    nll += SCALE(GMRF(Q_1), 1./tau_0_1)(omega_s_1);
-  }
 
-  // Time-varying SPDE (Epsilon)
-  if (use_pop_spatiotemporal == 1) {
-    if (use_pop_spatiotemporal_rw == 1) {
-      nll += SCALE(GMRF(Q_1), 1./tau_t_1)(epsilon_st_1.col(0)); // t=0
-      for (int t = 1; t < n_t; t++) {
-        nll += SCALE(GMRF(Q_1), 1./tau_t_1)(epsilon_st_1.col(t) - epsilon_st_1.col(t - 1));
-      }
-    } else if (use_pop_spatiotemporal_ar1 == 1) {
-      nll += SCALE(GMRF(Q_1), 1./(tau_t_1 * sqrt(Type(1.0) - rho_1 * rho_1)))(epsilon_st_1.col(0));
-      for (int t = 1; t < n_t; t++) {
-        nll += SCALE(GMRF(Q_1), 1./tau_t_1)(epsilon_st_1.col(t) - rho_1 * epsilon_st_1.col(t - 1));
-      }
-    } else {
-      for (int t = 0; t < n_t; t++) {
-        nll += SCALE(GMRF(Q_1), 1./tau_t_1)(epsilon_st_1.col(t));
-      }
-    }
-  }
-   
-  // Random vessel effect
-  if (use_vessel_effect == 1) {
-    for(int i=0; i<n_v; i++){
-      nll -= dnorm(ves_v_1(i), Type(0.0), ves_std_dev_1, true);
-    }
-  }
-  
-  // Differences in gear-speciafic catchability
-  if (use_q_diffs_system == 1) {
+    Type tau_flag_1 = Type(1.0) / (Type(2.0) * sqrt(M_PI) * kappa_1 * sigma_flag_1);
+    Type tau_flag_2 = Type(1.0) / (Type(2.0) * sqrt(M_PI) * kappa_2 * sigma_flag_2);
     for(int i=0; i<n_f-1; i++){
-      nll -= dnorm(flag_f_1(i), Type(0.0), flag_std_dev_1, true);
+      nll += SCALE(GMRF(Q_1), 1. / tau_flag_1)(flag_s_1.col(i));
+      nll += SCALE(GMRF(Q_2), 1. / tau_flag_2)(flag_s_2.col(i));
     }
   }
 
-  // Differences in gear-specific catchability over time
-  if (use_q_diffs_time == 1) {
-    for(int j=0; j<n_f-1; j++){
-      for(int t=0; t<n_t; t++){
-        if (has_tf(t, j) == 1) {
-          nll -= dnorm(flag_t_1(t, j), Type(0.0), flag_t_std_dev_1, true);
-        }
-      }
-    }
-  }
-  
-  // Differences in gear-specific catchability over space
-  if (use_q_diffs_spatial == 1) {
-    for(int i=0; i<n_f-1; i++){
-      nll += SCALE(GMRF(Q_1), 1./tau_flag_1)(flag_s_1.col(i));
-    }
-  }
-  
-  
-  // Positive catch
-  // Time-constant SPDE (Omega)
-  if (use_pop_spatial == 1) {
-    nll += SCALE(GMRF(Q_2), 1./tau_0_2)(omega_s_2);
-  }
-  
-  // Time-varying SPDE (Epsilon)
-  if (use_pop_spatiotemporal == 1) {
-    if (use_pop_spatiotemporal_rw == 1) {
-      nll += SCALE(GMRF(Q_2), 1./tau_t_2)(epsilon_st_2.col(0)); // t=0
-      for (int t = 1; t < n_t; t++) {
-        nll += SCALE(GMRF(Q_2), 1./tau_t_2)(epsilon_st_2.col(t) - epsilon_st_2.col(t - 1));
-      }
-    } else if (use_pop_spatiotemporal_ar1 == 1) {
-      nll += SCALE(GMRF(Q_2), 1./(tau_t_2 * sqrt(Type(1.0) - rho_2 * rho_2)))(epsilon_st_2.col(0));
-      for (int t = 1; t < n_t; t++) {
-        nll += SCALE(GMRF(Q_2), 1./tau_t_2)(epsilon_st_2.col(t) - rho_2 * epsilon_st_2.col(t - 1));
-      }
-    } else {
-      for (int t = 0; t < n_t; t++) {
-        nll += SCALE(GMRF(Q_2), 1./tau_t_2)(epsilon_st_2.col(t));
-      }
-    }
-  }
-   
-  // Random vessel effect
-  if (use_vessel_effect == 1) {
-    for(int i=0; i<n_v; i++){
-      nll -= dnorm(ves_v_2(i), Type(0.0), ves_std_dev_2, true);
-    }
-  }
-
-  // Differences in gear-specific catchability
-  if (use_q_diffs_system == 1) {
-    for(int i=0; i<n_f-1; i++){
-      nll -= dnorm(flag_f_2(i), Type(0.0), flag_std_dev_2, true);
-    }
-  }
-  
-  // Differences in gear-specific catchability over time
-  if (use_q_diffs_time == 1) {
-    for(int j=0; j<n_f-1; j++){
-      for(int t=0; t<n_t; t++){
-        if (has_tf(t, j) == 1) {
-          nll -= dnorm(flag_t_2(t, j), Type(0.0), flag_t_std_dev_2, true);
-        }
-      }
-    }
-  }
-  
-  // Differences in gear-specific catchability over space
-  if (use_q_diffs_spatial == 1) {
-    for(int i=0; i<n_f-1; i++){
-      nll += SCALE(GMRF(Q_2), 1./tau_flag_2)(flag_s_2.col(i));
-    }
-  }
-  
-  
-  // ---- mean-centering for flag_t over observed times (per flag column) ----
-  vector<Type> flag_t_mean_1(n_f - 1);
-  vector<Type> flag_t_mean_2(n_f - 1);
-  flag_t_mean_1.setZero();
-  flag_t_mean_2.setZero();
-
-  if (use_q_diffs_time == 1 && n_f > 1) {
-    for (int j = 0; j < n_f - 1; j++) {
-      Type sum1 = 0.0, sum2 = 0.0;
-      Type cnt  = 0.0;
-      for (int t = 0; t < n_t; t++) {
-        if (has_tf(t, j) == 1) {
-          sum1 += flag_t_1(t, j);
-          sum2 += flag_t_2(t, j);
-          cnt  += 1.0;
-        }
-      }
-      if (cnt > 0) {
-        flag_t_mean_1(j) = sum1 / cnt;
-        flag_t_mean_2(j) = sum2 / cnt;
-      } else {
-        // no data at all for this flag column across time: mean stays 0
-        flag_t_mean_1(j) = 0.0;
-        flag_t_mean_2(j) = 0.0;
-      }
-    }
-  }
     
 	
   // ---- Smooth contributions + priors ----
@@ -487,19 +440,18 @@ Type objective_function<Type>::operator() ()
     for (int s = 0; s < n_smooth; s++) {
       int k_s = Zs_catch(s).cols();
       int start = b_smooth_start_catch(s);
+      Type smooth_sd0 = exp(ln_smooth_sigma_catch(s, 0));
+      Type smooth_sd1 = exp(ln_smooth_sigma_catch(s, 1));
 
       vector<Type> beta0(k_s);
-      for (int j = 0; j < k_s; j++) {
-        beta0(j) = b_smooth_catch(start + j, 0);
-        nll -= dnorm(beta0(j), Type(0.0), exp(ln_smooth_sigma_catch(s, 0)), true);
-      }
-      eta_smooth_catch_1 += Zs_catch(s) * beta0;
-
       vector<Type> beta1(k_s);
       for (int j = 0; j < k_s; j++) {
+        beta0(j) = b_smooth_catch(start + j, 0);
         beta1(j) = b_smooth_catch(start + j, 1);
-        nll -= dnorm(beta1(j), Type(0.0), exp(ln_smooth_sigma_catch(s, 1)), true);
+        nll -= dnorm(beta0(j), Type(0.0), smooth_sd0, true);
+        nll -= dnorm(beta1(j), Type(0.0), smooth_sd1, true);
       }
+      eta_smooth_catch_1 += Zs_catch(s) * beta0;
       eta_smooth_catch_2 += Zs_catch(s) * beta1;
     }
 
@@ -515,20 +467,19 @@ Type objective_function<Type>::operator() ()
     for (int s = 0; s < n_smooth; s++) {
       int k_s = Zs_pop_i(s).cols();
       int start = b_smooth_start_pop(s);
+      Type smooth_sd0 = exp(ln_smooth_sigma_pop(s, 0));
+      Type smooth_sd1 = exp(ln_smooth_sigma_pop(s, 1));
 
       vector<Type> beta0(k_s);
+      vector<Type> beta1(k_s);
       for (int j = 0; j < k_s; j++) {
         beta0(j) = b_smooth_pop(start + j, 0);
-        nll -= dnorm(beta0(j), Type(0.0), exp(ln_smooth_sigma_pop(s, 0)), true);
+        beta1(j) = b_smooth_pop(start + j, 1);
+        nll -= dnorm(beta0(j), Type(0.0), smooth_sd0, true);
+        nll -= dnorm(beta1(j), Type(0.0), smooth_sd1, true);
       }
       eta_smooth_pop_i_1 += Zs_pop_i(s) * beta0;
       eta_smooth_pop_g_1 += Zs_pop_g(s) * beta0;
-
-      vector<Type> beta1(k_s);
-      for (int j = 0; j < k_s; j++) {
-        beta1(j) = b_smooth_pop(start + j, 1);
-        nll -= dnorm(beta1(j), Type(0.0), exp(ln_smooth_sigma_pop(s, 1)), true);
-      }
       eta_smooth_pop_i_2 += Zs_pop_i(s) * beta1;
       eta_smooth_pop_g_2 += Zs_pop_g(s) * beta1;
     }
@@ -564,20 +515,41 @@ Type objective_function<Type>::operator() ()
     s_effect_2 = A_is * omega_s_2;
   }
   
-  for(int r=0; r<Ais_ij.rows(); r++){
-    int i = Ais_ij(r, 0);  // observation
-    int s = Ais_ij(r, 1);  // knot
-	int t_id = t_i(i);
-	int f_id = f_i(i);
+  if (use_pop_spatiotemporal == 1 && use_q_diffs_spatial == 1) {
+    for(int r=0; r<Ais_ij.rows(); r++){
+      int i = Ais_ij(r, 0);  // observation
+      int s = Ais_ij(r, 1);  // knot
+      int t_id = t_i(i);
+      int f_id = f_i(i);
+      Type a_is = Ais_x(r);
 
-    if (use_pop_spatiotemporal == 1) {
-	  st_effect_1(i) += Ais_x(r) * epsilon_st_1(s, t_id);
-	  st_effect_2(i) += Ais_x(r) * epsilon_st_2(s, t_id);
+      st_effect_1(i) += a_is * epsilon_st_1(s, t_id);
+      st_effect_2(i) += a_is * epsilon_st_2(s, t_id);
+
+      if (f_id > 0) {
+        flag_s_effect_1(i) += a_is * flag_s_1(s, f_id-1);
+        flag_s_effect_2(i) += a_is * flag_s_2(s, f_id-1);
+      }
     }
-	
-    if (use_q_diffs_spatial == 1 && f_id > 0){
-      flag_s_effect_1(i) += Ais_x(r) * flag_s_1(s, f_id-1);
-      flag_s_effect_2(i) += Ais_x(r) * flag_s_2(s, f_id-1);
+  } else if (use_pop_spatiotemporal == 1) {
+    for(int r=0; r<Ais_ij.rows(); r++){
+      int i = Ais_ij(r, 0);  // observation
+      int s = Ais_ij(r, 1);  // knot
+      int t_id = t_i(i);
+      Type a_is = Ais_x(r);
+      st_effect_1(i) += a_is * epsilon_st_1(s, t_id);
+      st_effect_2(i) += a_is * epsilon_st_2(s, t_id);
+    }
+  } else if (use_q_diffs_spatial == 1) {
+    for(int r=0; r<Ais_ij.rows(); r++){
+      int i = Ais_ij(r, 0);  // observation
+      int s = Ais_ij(r, 1);  // knot
+      int f_id = f_i(i);
+      if (f_id > 0) {
+        Type a_is = Ais_x(r);
+        flag_s_effect_1(i) += a_is * flag_s_1(s, f_id-1);
+        flag_s_effect_2(i) += a_is * flag_s_2(s, f_id-1);
+      }
     }
   }
   
@@ -699,6 +671,7 @@ Type objective_function<Type>::operator() ()
     Type S;
     for (int t=0; t < n_t; t++) {
       S = mu_total(t);
+	  S = newton::Tag(S);
       nll_penalty += eps_index(t) * S;
     }
   }
