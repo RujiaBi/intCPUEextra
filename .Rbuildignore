@@ -5,5 +5,3 @@
 ^pkgdown$
 ^.*\.Rproj$
 ^\.Rproj\.user$
-^\.github$
-^.*\.DS_Store$

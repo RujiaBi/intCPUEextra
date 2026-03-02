@@ -7,8 +7,6 @@
 # * https://testthat.r-lib.org/articles/special-files.html
 
 library(testthat)
-library(jointCPUE)
+library(intCPUE)
 
-Sys.setenv(TESTTHAT_CPUS = "1")
-
-test_check("jointCPUE")
+test_check("intCPUE")

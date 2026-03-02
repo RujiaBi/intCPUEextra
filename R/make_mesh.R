@@ -6,7 +6,7 @@
 # https://github.com/kaskr/adcomp/tree/master/tmb_examples
 # ------------------------------------------------------------------------------
 
-#' Construct an SPDE mesh for jointCPUE
+#' Construct an SPDE mesh for intCPUE
 #'
 #' mesh constructor with convenience options:
 #' - "cutoff": simplest mesh given `cutoff`
@@ -28,7 +28,7 @@
 #' @param ... Passed to `fmesher_func`. Examples: `max.edge`, `offset`,
 #'   `cutoff`, `extend`, `refine`.
 #'
-#' @return An object of class `jointCPUEmesh` with elements `mesh`, `spde`, `A`,
+#' @return An object of class `intCPUEmesh` with elements `mesh`, `spde`, `A`,
 #'   `loc_xy`, `xy_cols`, and `loc_centers` (for kmeans).
 #' @export
 make_mesh <- function(
@@ -149,7 +149,7 @@ make_mesh <- function(
     spde = spde,
     A = A,
     loc_centers = loc_centers
-  ), class = "jointCPUEmesh")
+  ), class = "intCPUEmesh")
   
   if (!is.null(mesh$n) && mesh$n > 1000L) {
     message("This mesh has > 1000 vertices; consider simplifying for speed.")
@@ -158,14 +158,13 @@ make_mesh <- function(
   out
 }
 
-#' Plot a jointCPUE mesh
+#' Plot an intCPUE mesh
 #'
-#' @param x A `jointCPUEmesh` object.
+#' @param x An intCPUEmesh object
 #' @param ... passed to plot()
-#'
-#' @method plot jointCPUEmesh
 #' @export
-plot.jointCPUEmesh <- function(x, ...) {
+#' @method plot intCPUEmesh
+plot.intCPUEmesh <- function(x, ...) {
   graphics::plot(x$mesh, main = NA, asp = 1, ...)
   graphics::points(x$loc_xy, pch = 21, cex = 0.3, col = "#00000080")
   if (!is.null(x$loc_centers) && all(is.finite(x$loc_centers))) {
