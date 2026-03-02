@@ -9,7 +9,7 @@
 * using options '--no-manual --ignore-vignettes'
 * checking for file 'intCPUE/DESCRIPTION' ... OK
 * checking extension type ... Package
-* this is package 'intCPUE' version '0.1.0'
+* this is package 'intCPUE' version '0.2.0'
 * package encoding: UTF-8
 * checking package namespace information ... OK
 * checking package dependencies ... OK
@@ -23,7 +23,7 @@
 * used C++ compiler: 'Apple clang version 14.0.3 (clang-1403.0.22.14.1)'
 * used SDK: 'MacOSX13.3.sdk'
 * checking installed package size ... NOTE
-  installed size is  8.4Mb
+  installed size is  8.5Mb
   sub-directories of 1Mb or more:
     help   4.6Mb
     libs   3.7Mb
@@ -40,6 +40,7 @@
 * checking whether the package can be unloaded cleanly ... OK
 * checking whether the namespace can be loaded with stated dependencies ... OK
 * checking whether the namespace can be unloaded cleanly ... OK
+* checking loading without being on the library search path ... OK
 * checking dependencies in R code ... OK
 * checking S3 generic/method consistency ... OK
 * checking replacement functions ... OK

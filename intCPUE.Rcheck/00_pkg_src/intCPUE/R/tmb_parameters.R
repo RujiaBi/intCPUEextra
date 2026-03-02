@@ -17,14 +17,36 @@
 #' @param n_v Number of vessels (or vessel IDs) after recoding.
 #' @param n_f Number of flags after recoding (including baseline flag = level 0).
 #' @param n_s Number of SPDE vertices (mesh nodes).
-#' @param K_smooth Number of fixed-effect columns from smooth terms (Xs).
-#' @param n_smooth Number of smooth terms (length of Zs list).
-#' @param sum_k Total number of penalized coefficients across smooths
-#'   (sum of ncol(Zs`k`) over k), i.e., length of b_smooth.
+#' @param K_smooth_catch Number of fixed-effect columns from catchability smooths.
+#' @param n_smooth_catch Number of catchability smooth terms (length of Zs list).
+#' @param sum_k_catch Total number of penalized coefficients across catchability smooths.
+#' @param K_smooth_pop Number of fixed-effect columns from population smooths.
+#' @param n_smooth_pop Number of population smooth terms (length of Zs list).
+#' @param sum_k_pop Total number of penalized coefficients across population smooths.
+#' @param K_smooth Legacy alias for `K_smooth_catch`.
+#' @param n_smooth Legacy alias for `n_smooth_catch`.
+#' @param sum_k Legacy alias for `sum_k_catch`.
 #'
 #' @return Named list of initial parameter values for TMB::MakeADFun().
 #' @keywords internal
-.make_parameters_intCPUE <- function(n_t, n_v, n_f, n_s, K_smooth, n_smooth, sum_k) {
+.make_parameters_intCPUE <- function(
+    n_t,
+    n_v,
+    n_f,
+    n_s,
+    K_smooth_catch = 0L,
+    n_smooth_catch = 0L,
+    sum_k_catch = 0L,
+    K_smooth_pop = 0L,
+    n_smooth_pop = 0L,
+    sum_k_pop = 0L,
+    K_smooth = NULL,
+    n_smooth = NULL,
+    sum_k = NULL
+) {
+  if (!is.null(K_smooth)) K_smooth_catch <- K_smooth
+  if (!is.null(n_smooth)) n_smooth_catch <- n_smooth
+  if (!is.null(sum_k)) sum_k_catch <- sum_k
   
   # Helper for allocating numeric matrices on the working scale.
   # Using 0.0 is standard: it corresponds to neutral effects on log/logit scales.
@@ -42,6 +64,7 @@
     # Residual SD (often used for positive-component likelihood or observation noise).
     # Stored on log scale in C++ for positivity.
     ln_sd = 0.0,
+    ln_sd_flag = rep(0.0, n_f),
     
     # ==========================================================
     # Anisotropy parameters
@@ -58,10 +81,12 @@
     # Marginal SDs on log scale:
     ln_sigma_0_1    = 0.0,   # spatial (omega) SD
     ln_sigma_t_1    = 0.0,   # spatiotemporal (epsilon) SD
+    transf_rho_1    = 0.0,   # spatiotemporal AR1 correlation (working scale)
     
     ln_range_2 = 0.0,
     ln_sigma_0_2    = 0.0,
     ln_sigma_t_2    = 0.0,
+    transf_rho_2    = 0.0,
     
     # ==========================================================
     # Vessel random effects (two components)
@@ -132,18 +157,18 @@
     ln_sigma_flag_2 = 0.0,
     
     # ==========================================================
-    # Smooth terms (mgcv::s())
+    # Catchability smooth terms (mgcv::s())
     # ==========================================================
-    # bs: fixed-effect coefficients for smooth "parametric" parts (Xs),
-    # one column per model component (2 columns = encounter + positive).
-    bs = empty_mat(K_smooth, 2L),
-    
-    # b_smooth: penalized coefficients (stacked across smooths; length = sum_k),
-    # stored as a (sum_k x 2) matrix for two components.
-    b_smooth = empty_mat(sum_k, 2L),
-    
-    # ln_smooth_sigma: log SD hyperparameters for each smooth (n_smooth x 2).
-    ln_smooth_sigma = empty_mat(n_smooth, 2L),
+    bs_catch = empty_mat(K_smooth_catch, 2L),
+    b_smooth_catch = empty_mat(sum_k_catch, 2L),
+    ln_smooth_sigma_catch = empty_mat(n_smooth_catch, 2L),
+
+    # ==========================================================
+    # Population smooth terms (mgcv::s())
+    # ==========================================================
+    bs_pop = empty_mat(K_smooth_pop, 2L),
+    b_smooth_pop = empty_mat(sum_k_pop, 2L),
+    ln_smooth_sigma_pop = empty_mat(n_smooth_pop, 2L),
     
     # ==========================================================
     # Optional "epsilon trick" / stabilization term

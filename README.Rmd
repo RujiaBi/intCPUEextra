@@ -46,7 +46,7 @@ The model supports:
 
 - mgcv-style `s()` smooth terms parsed into mixed-effects from inside TMB
 
-This is currently a Poisson-link delta model. At present, population density is affected only by temporal effects, spatial effects, and spatiotemporal effects. Smooth terms are not yet allowed to affect population density; they currently affect catchability only. More flexible model specifications will be added in future releases.
+This is currently a Poisson-link delta model. The baseline population surface is always driven by temporal effects, with optional spatial (`pop_spatial`) and spatiotemporal (`pop_spatiotemporal`) random fields. Smooth terms can be assigned either to catchability only or to the population layer. Population-layer smooths are included both in the observation model and in projection, so they affect the standardized index.
 
 Here provides a minimal workflow: install → data preparation → coordinate projection → mesh → model fitting → index extraction.
     
@@ -172,35 +172,67 @@ plot(mesh)
 ## Fit the model
 
 ```r
-formula_1 <- "cpue ~ 1"
-formula_2 <- "cpue ~ 1 + s(depth)"
+formula_catchability <- ~ s(depth)
+formula_population <- ~ s(temp) + s(chl)
 ```
-Interpretation of `~ 1`:
+Interpretation of the baseline model:
 
 Both encounter and positive components include:
 
 - fixed temporal effects (`tid`, as intercepts)
 
-- spatial random field (`omega`)
+- optional spatial random field (`omega`)
 
-- spatiotemporal random field (`epsilon`)
+- optional spatiotemporal random field (`epsilon`)
+
+`formula_catchability` adds smooth covariates that affect catchability only.
+
+`formula_population` adds smooth covariates that affect the latent population surface and therefore also enter projection. When population covariates are not uniquely defined within each extrapolation cell, provide them explicitly through `projection_data`. If they also vary over time, include a `tid` column in `projection_data` so the projection covariates are matched by grid cell and time.
+
+The legacy `formula = ...` interface is still supported and is treated as `formula_catchability = ...`.
+
+### `projection_data` format
+
+If `formula_population` is used, population covariates must be available on the extrapolation grid:
+
+- Static population covariates: `projection_data` should contain one row per extrapolation grid cell, with columns `utm_x_scale`, `utm_y_scale`, and the covariates used in `formula_population`.
+- Time-varying population covariates: `projection_data` should contain one row per grid cell-time combination, with columns `utm_x_scale`, `utm_y_scale`, `tid`, and the covariates used in `formula_population`.
+- If `formula_population` mixes static and time-varying covariates, use the grid cell-time format and repeat the static covariate values across `tid`.
+
+`tid` must use the same 0-based coding as `data_utm$tid`.
 
 ```r
 ncores <- 4
 mesh <- make_mesh(data_utm, xy_cols = c("utm_x_scale", "utm_y_scale"), type = "cutoff", cutoff = 0.1)
 fit <- intCPUE(
-  formula_2,
-  data = data_utm,
+  formula_catchability = formula_catchability,
+  data_utm = data_utm,
   mesh = mesh,
-  vessel_effect = "off",  # "on" or "off", same in the following
+  pop_spatial = "on",
+  pop_spatiotemporal = "on",
+  pop_spatiotemporal_type = "rw",
+  vessel_effect = "off",
   q_diffs_system = "off",  
   q_diffs_time = "off",  
-  q_diffs_spatial = "off", 
+  q_diffs_spatial = "off",
+  obs_sd = "shared",
   ncores = ncores
 )
 ```
 
+### Population components
+
+* `pop_spatial` — turns the population spatial field on or off
+
+* `pop_spatiotemporal` — turns the population spatiotemporal field on or off
+
+* `pop_spatiotemporal_type` — temporal dependence for the population spatiotemporal field (`"rw"`, `"iid"`, or `"ar1"`)
+
 ### Catchability components
+
+* `vessel_effect` — vessel-level random effect, modeled as \(N(0, \sigma^2)\), affecting catchability
+
+* `obs_sd` — positive-catch lognormal observation SD, either shared across flags (`"shared"`) or flag-specific (`"flag"`)
 
 * `q_diffs_system` — systematic catchability difference among fisheries (i.e., factor effect)
 
@@ -214,18 +246,25 @@ For the reference fishery (`flagid = 0`), these are constrained to 0.
 
 ```r
 index <- get_index(fit)
-library(ggplot2)
-ggplot(index, aes(time, index)) +
-  geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey90") +
-  geom_line(lwd = 1, colour = "grey30") +
-  labs(x = "Time", y = "Biomass")
+plot_index(index)
+```
+
+## Diagnostics
+
+```r
+check_convergence(fit)
+calc_marginal_aic(fit)
+
+pred <- get_predicted(fit, data = data_utm)
+plots <- plot_residuals(pred, observed_col = "cpue")
+
+plots$observed_predicted
+plots$spatial_residual
+
+plot_anisotropy(fit)
 ```
 
 ## Next steps
-
-- more flexible settings on smooth terms
-
-- diagnostic and plotting functions
 
 - preferential sampling correction
 

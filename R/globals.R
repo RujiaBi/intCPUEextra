@@ -1,0 +1,14 @@
+utils::globalVariables(c(
+  "axis_type",
+  "component",
+  "observed",
+  "panel",
+  "predicted",
+  "time",
+  "value",
+  "x",
+  "xend",
+  "y",
+  "yend",
+  "z"
+))

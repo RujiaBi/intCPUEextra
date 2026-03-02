@@ -1,8 +1,8 @@
 Package: intCPUE
 Type: Package
 Title: Integrated Spatiotemporal CPUE Standardization via TMB
-Version: 0.1.0
-Date: 2026-02-06
+Version: 0.2.0
+Date: 2026-03-02
 Authors@R: 
     person("Rujia", "Bi", , "rbi@iattc.org", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-1954-6797"))
@@ -15,6 +15,7 @@ Notice: inst/NOTICE
 Depends:
     R (>= 4.4.0)
 Imports:
+    ggplot2,
     Matrix,
     methods,
     mgcv,

@@ -8,18 +8,60 @@
 # (e.g., flag temporal random effects with < 2 time points).
 #
 .make_map_intCPUE <- function(parameters, n_f,
+                              pop_spatial = c("on","off"),
+                              pop_spatiotemporal = c("on","off"),
+                              pop_spatiotemporal_type = c("rw","iid","ar1"),
                               vessel_effect = c("on","off"),
                               q_diffs_system = c("on","off"),
                               q_diffs_time = c("on","off"),
                               q_diffs_spatial = c("on","off"),
+                              obs_sd = c("shared","flag"),
                               has_tf = NULL) {
-  
+
+  pop_spatial <- match.arg(pop_spatial)
+  pop_spatiotemporal <- match.arg(pop_spatiotemporal)
+  pop_spatiotemporal_type <- match.arg(pop_spatiotemporal_type)
   vessel_effect  <- match.arg(vessel_effect)
   q_diffs_system <- match.arg(q_diffs_system)
   q_diffs_time   <- match.arg(q_diffs_time)
   q_diffs_spatial<- match.arg(q_diffs_spatial)
+  obs_sd <- match.arg(obs_sd)
   
   map <- list()
+
+  # ---------------------------------------------------------
+  # Observation SD
+  # ---------------------------------------------------------
+  if (obs_sd == "shared") {
+    map$ln_sd_flag <- factor(rep(NA, length(parameters$ln_sd_flag)))
+  } else {
+    map$ln_sd <- factor(NA)
+  }
+
+  # ---------------------------------------------------------
+  # Population spatial fields
+  # ---------------------------------------------------------
+  if (pop_spatial == "off") {
+    map$omega_s_1 <- factor(rep(NA, length(parameters$omega_s_1)))
+    map$omega_s_2 <- factor(rep(NA, length(parameters$omega_s_2)))
+    map$ln_sigma_0_1 <- factor(NA)
+    map$ln_sigma_0_2 <- factor(NA)
+  }
+
+  # ---------------------------------------------------------
+  # Population spatiotemporal fields
+  # ---------------------------------------------------------
+  if (pop_spatiotemporal == "off") {
+    map$epsilon_st_1 <- .map_matrix_NA(parameters$epsilon_st_1)
+    map$epsilon_st_2 <- .map_matrix_NA(parameters$epsilon_st_2)
+    map$ln_sigma_t_1 <- factor(NA)
+    map$ln_sigma_t_2 <- factor(NA)
+    map$transf_rho_1 <- factor(NA)
+    map$transf_rho_2 <- factor(NA)
+  } else if (pop_spatiotemporal_type != "ar1") {
+    map$transf_rho_1 <- factor(NA)
+    map$transf_rho_2 <- factor(NA)
+  }
   
   # ---------------------------------------------------------
   # Vessel random effects
@@ -121,6 +163,18 @@
     map$flag_s_2 <- .map_matrix_NA(parameters$flag_s_2)
     map$ln_sigma_flag_1 <- factor(NA)
     map$ln_sigma_flag_2 <- factor(NA)
+  }
+
+  use_any_spde <- (
+    pop_spatial == "on" ||
+    pop_spatiotemporal == "on" ||
+    (q_diffs_spatial == "on" && n_f > 1L)
+  )
+
+  if (!use_any_spde) {
+    map$ln_range_1 <- factor(NA)
+    map$ln_range_2 <- factor(NA)
+    map$ln_H_input <- factor(rep(NA, length(parameters$ln_H_input)))
   }
   
   map

@@ -1,7 +1,13 @@
+calc_marginal_aic       Calculate marginal AIC
 calculate_area          Calculate equal-area size (km^2) for each
                         lon/lat grid cell
+check_convergence       Check Model Convergence
+get_fitted              Get observation-level fitted values and
+                        residuals
 get_index               Get bias-corrected index and uncertainty from
                         an intCPUE fit
+get_predicted           Get observation-level predicted values and
+                        residuals
 intCPUE                 Fit an integrated spatiotemporal CPUE
                         standardization model
 make_data               Prepare data objects and mesh for intCPUE
@@ -10,3 +16,7 @@ make_mesh               Construct an SPDE mesh for intCPUE
 make_utm                Convert lon/lat to UTM coordinates with robust
                         longitude handling
 plot.intCPUEmesh        Plot an intCPUE mesh
+plot_anisotropy         Plot anisotropy ellipses for the fitted spatial
+                        fields
+plot_index              Plot standardized CPUE index and CV
+plot_residuals          Plot residual diagnostics

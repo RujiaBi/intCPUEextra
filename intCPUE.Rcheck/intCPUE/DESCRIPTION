@@ -1,8 +1,8 @@
 Package: intCPUE
 Type: Package
 Title: Integrated Spatiotemporal CPUE Standardization via TMB
-Version: 0.1.0
-Date: 2026-02-06
+Version: 0.2.0
+Date: 2026-03-02
 Authors@R: 
     person("Rujia", "Bi", , "rbi@iattc.org", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-1954-6797"))
@@ -13,7 +13,7 @@ Description: Provides an integrated framework for catch-per-unit-effort (CPUE)
 License: GPL-3
 Notice: inst/NOTICE
 Depends: R (>= 4.4.0)
-Imports: Matrix, methods, mgcv, stats, fmesher, TMB, sf
+Imports: ggplot2, Matrix, methods, mgcv, stats, fmesher, TMB, sf
 LinkingTo: RcppEigen, TMB
 Suggests: knitr, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr
@@ -27,7 +27,7 @@ Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
 SystemRequirements: GNU make
 NeedsCompilation: yes
-Packaged: 2026-03-02 04:23:32 UTC; rujiabi
+Packaged: 2026-03-02 06:59:15 UTC; rujiabi
 Author: Rujia Bi [aut, cre] (<https://orcid.org/0000-0002-1954-6797>)
 Maintainer: Rujia Bi <rbi@iattc.org>
-Built: R 4.4.2; aarch64-apple-darwin20; 2026-03-02 04:23:40 UTC; unix
+Built: R 4.4.2; aarch64-apple-darwin20; 2026-03-02 06:59:23 UTC; unix

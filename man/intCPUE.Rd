@@ -5,13 +5,20 @@
 \title{Fit an integrated spatiotemporal CPUE standardization model}
 \usage{
 intCPUE(
-  formula,
+  formula = NULL,
   data_utm,
   mesh,
+  formula_catchability = NULL,
+  formula_population = NULL,
+  projection_data = NULL,
+  pop_spatial = c("on", "off"),
+  pop_spatiotemporal = c("on", "off"),
+  pop_spatiotemporal_type = c("rw", "iid", "ar1"),
   vessel_effect = c("on", "off"),
   q_diffs_system = c("on", "off"),
   q_diffs_time = c("on", "off"),
   q_diffs_spatial = c("on", "off"),
+  obs_sd = c("shared", "flag"),
   control = list(eval.max = 1e+05, iter.max = 1e+05),
   ncores = NULL,
   ...,
@@ -19,11 +26,40 @@ intCPUE(
 )
 }
 \arguments{
-\item{formula}{A model formula with optional mgcv::s() smooth terms.}
+\item{formula}{Legacy one-sided or two-sided model formula with optional
+mgcv::s() smooth terms. If supplied, it is treated as
+\code{formula_catchability}.}
 
 \item{data_utm}{A data.frame with required columns.}
 
 \item{mesh}{An \code{intCPUEmesh} or a bare fmesher mesh.}
+
+\item{formula_catchability}{Optional one-sided or two-sided formula defining
+smooth terms that affect catchability only.}
+
+\item{formula_population}{Optional one-sided or two-sided formula defining
+smooth terms that affect the latent population surface and therefore also
+enter projection.}
+
+\item{projection_data}{Optional projection-grid data for population smooth
+covariates. Passed to \code{\link[=make_data]{make_data()}}. For static population covariates,
+supply one row per extrapolation grid cell with columns \code{utm_x_scale},
+\code{utm_y_scale}, and the covariate names used in \code{formula_population}. For
+time-varying population covariates, additionally include \code{tid} and supply
+one row per grid cell-time combination. If \code{formula_population} mixes
+static and time-varying covariates, use the grid cell-time format and
+repeat static covariate values across \code{tid}.}
+
+\item{pop_spatial}{"on" or "off". If "off", the population spatial field is
+fixed at 0.}
+
+\item{pop_spatiotemporal}{"on" or "off". If "off", the population
+spatiotemporal field is fixed at 0.}
+
+\item{pop_spatiotemporal_type}{One of \code{"rw"}, \code{"iid"}, or \code{"ar1"}.
+Controls the temporal dependence structure of the population
+spatiotemporal field when \code{pop_spatiotemporal = "on"}. Defaults to \code{"rw"}
+to preserve the previous model behavior.}
 
 \item{vessel_effect}{"on" or "off". If "off", vessel RE is fixed at 0 via map.}
 
@@ -33,17 +69,18 @@ intCPUE(
 
 \item{q_diffs_spatial}{"on" or "off". If "off", flag-specific spatial fields are fixed.}
 
+\item{obs_sd}{\code{"shared"} or \code{"flag"}. If \code{"flag"}, the positive-catch
+lognormal observation SD is estimated separately for each flag.}
+
 \item{control}{Control list passed to \code{\link[stats:nlminb]{stats::nlminb()}}.}
 
 \item{ncores}{Optional integer. If provided, sets the number of OpenMP threads. Passed to \code{\link[TMB:openmp]{TMB::openmp()}}.}
 
-\item{...}{Passed to \code{\link[=make_data]{make_data()}} (e.g., utm_zone, coord_scale, area_scale).}
+\item{...}{Passed to \code{\link[=make_data]{make_data()}} (for example, \code{area_scale}).}
 
 \item{silent}{Logical. Passed to \code{\link[TMB:MakeADFun]{TMB::MakeADFun()}}.}
 }
 \value{
-An object of class \code{intCPUE} with elements \code{obj}, \code{opt}, \code{rep}, \code{prep}, etc.
-
 An object of class \code{intCPUE} with elements \code{obj}, \code{opt}, \code{rep}, \code{prep}, etc.
 }
 \description{

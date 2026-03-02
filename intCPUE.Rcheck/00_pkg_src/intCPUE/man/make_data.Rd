@@ -4,14 +4,45 @@
 \alias{make_data}
 \title{Prepare data objects and mesh for intCPUE workflows}
 \usage{
-make_data(formula, data_utm, mesh, area_scale = "auto")
+make_data(
+  formula = NULL,
+  data_utm,
+  mesh,
+  formula_catchability = NULL,
+  formula_population = NULL,
+  projection_data = NULL,
+  area_scale = "auto"
+)
 }
 \arguments{
-\item{formula}{A model formula. Smooth terms must use s().}
+\item{formula}{Legacy model formula. If supplied, it is treated as
+\code{formula_catchability}.}
 
 \item{data_utm}{A data.frame containing required columns (with utm_x/y_scale)}
 
 \item{mesh}{intCPUEmesh built from make_mesh(), or a custom mesh}
+
+\item{formula_catchability}{Optional one-sided or two-sided formula defining
+smooth terms that affect catchability only.}
+
+\item{formula_population}{Optional one-sided or two-sided formula defining
+smooth terms that affect both the observation model and the projected
+population density surface.}
+
+\item{projection_data}{Optional data.frame giving projection-grid covariates
+for \code{formula_population}. It must contain \code{utm_x_scale} and \code{utm_y_scale}
+matching the extrapolation grid. If it also contains \code{tid}, it is treated
+as time-varying projection data with one row per grid cell-time
+combination. If omitted, \code{make_data()} attempts to derive a static
+projection table from \code{data_utm} and replicate it across time; this only
+works when each population-smooth covariate is uniquely defined within
+each grid cell. In summary:
+(1) static population covariates: one row per grid cell;
+(2) time-varying population covariates: one row per grid cell-time
+combination, with \code{tid} coded the same way as \code{data_utm$tid};
+(3) if both static and time-varying covariates are used together, provide
+one row per grid cell-time combination and repeat the static covariate
+values across \code{tid}.}
 
 \item{area_scale}{Numeric or "auto". Scaling factor for area_km2.}
 }
@@ -23,7 +54,7 @@ Main data-prep function for intCPUE.
 \itemize{
 \item mesh/SPDE/A matrices
 \item extrapolation key grid + areas
-\item parse smoothers (mgcv s()) into Xs/Zs
+\item parse catchability and population smooths (mgcv \code{s()}) into Xs/Zs
 }
 }
 \author{
