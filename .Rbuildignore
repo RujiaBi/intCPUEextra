@@ -8,3 +8,5 @@
 ^\.github$
 ^\.DS_Store$
 ^.*\/\.DS_Store$
+^inst/tmb/.*\.(dll|so|dylib)$
+^src/tmb/.*\.(o|obj|so|dll|dylib)$

@@ -248,8 +248,6 @@ test_that("diagnostic helpers return expected objects for a fitted model", {
       formula = cpue ~ 1,
       data_utm = data_utm,
       mesh = mesh,
-      vessel_effect = "off",
-      q_diffs_system = "off",
       q_diffs_time = "off",
       q_diffs_spatial = "off",
       control = list(eval.max = 200, iter.max = 200),
@@ -283,42 +281,4 @@ test_that("diagnostic helpers return expected objects for a fitted model", {
 
   fitted_alias <- get_fitted(fit)
   expect_equal(fitted_alias$fitted, pred$fitted)
-})
-
-test_that("plot_anisotropy errors when no spatial component is active", {
-  skip_if_not_installed("sf")
-  skip_if_not_installed("fmesher")
-  skip_if_not_installed("TMB")
-
-  data_input <- make_small_intcpue_input()
-  utm <- make_utm(data_input, utm_zone = NULL, coord_scale = "auto")
-  data_utm <- utm$data_utm
-
-  mesh <- make_mesh(
-    data_utm,
-    xy_cols = c("utm_x_scale", "utm_y_scale"),
-    type = "cutoff",
-    cutoff = 0.2
-  )
-
-  fit_no_spatial <- suppressWarnings(
-    intCPUE(
-      formula = cpue ~ 1,
-      data_utm = data_utm,
-      mesh = mesh,
-      pop_spatial = "off",
-      pop_spatiotemporal = "off",
-      vessel_effect = "off",
-      q_diffs_system = "off",
-      q_diffs_time = "off",
-      q_diffs_spatial = "off",
-      control = list(eval.max = 200, iter.max = 200),
-      silent = TRUE
-    )
-  )
-
-  expect_error(
-    plot_anisotropy(fit_no_spatial),
-    "No spatial or spatially varying component is active"
-  )
 })

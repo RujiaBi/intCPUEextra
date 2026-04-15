@@ -11,9 +11,9 @@ intCPUE(
   formula_catchability = NULL,
   formula_population = NULL,
   projection_data = NULL,
-  pop_spatiotemporal_type = c("rw", "ar1"),
   q_diffs_time = c("on", "off"),
   q_diffs_spatial = c("on", "off"),
+  pop_spatiotemporal_type = c("rw", "ar1"),
   obs_sd = c("shared", "flag"),
   control = list(eval.max = 1e+05, iter.max = 1e+05),
   ncores = NULL,
@@ -46,13 +46,17 @@ one row per grid cell-time combination. If \code{formula_population} mixes
 static and time-varying covariates, use the grid cell-time format and
 repeat static covariate values across \code{tid}.}
 
+\item{q_diffs_time}{"on" or "off". Controls whether flag-specific temporal
+deviations are included. Implemented via dedicated TMB templates rather
+than \code{map}.}
+
+\item{q_diffs_spatial}{"on" or "off". Controls whether flag-specific spatial
+deviations are included. Implemented via dedicated TMB templates rather
+than \code{map}.}
+
 \item{pop_spatiotemporal_type}{\code{"rw"} or \code{"ar1"}. Controls whether the
 always-on spatiotemporal population field follows a random-walk or AR1
 evolution over time.}
-
-\item{q_diffs_time}{"on" or "off". If "off", flag-specific temporal effects are fixed.}
-
-\item{q_diffs_spatial}{"on" or "off". If "off", flag-specific spatial fields are fixed.}
 
 \item{obs_sd}{\code{"shared"} or \code{"flag"}. If \code{"flag"}, the positive-catch
 lognormal observation SD is estimated separately for each flag.}
