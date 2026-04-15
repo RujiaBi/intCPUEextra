@@ -27,7 +27,7 @@ Modified code fragments and structural patterns adapted from VAST are used in:
   R/index.R
     bias-correction workflow
 
-  R/extra-optimization.R
+  R/tmb_utils.R
     multi-stage optimization pattern
 
 The statistical model implemented in intCPUE is different from VAST and
