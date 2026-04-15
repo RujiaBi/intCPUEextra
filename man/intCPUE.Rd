@@ -18,7 +18,10 @@ intCPUE(
   control = list(eval.max = 1e+05, iter.max = 1e+05),
   ncores = NULL,
   ...,
-  silent = FALSE
+  silent = FALSE,
+  restart_max = 1L,
+  newton_max = 2L,
+  coord_max = 5L
 )
 }
 \arguments{
@@ -68,6 +71,18 @@ lognormal observation SD is estimated separately for each flag.}
 \item{...}{Passed to \code{\link[=make_data]{make_data()}} (for example, \code{area_scale}).}
 
 \item{silent}{Logical. Passed to \code{\link[TMB:MakeADFun]{TMB::MakeADFun()}}.}
+
+\item{restart_max}{Non-negative integer. Maximum number of automatic
+\code{nlminb()} restarts attempted from the current best parameter vector when
+convergence or gradient checks remain unsatisfactory.}
+
+\item{newton_max}{Non-negative integer. Maximum number of
+\code{\link[TMB:newton]{TMB::newton()}} refinement attempts after \code{nlminb()}/restart stages.}
+
+\item{coord_max}{Non-negative integer. Maximum number of coordinate-polish
+iterations attempted after the restart/Newton stages. Set
+\code{restart_max = 0}, \code{newton_max = 0}, and \code{coord_max = 0} to run only a
+single \code{nlminb()} pass.}
 }
 \value{
 An object of class \code{intCPUE} with elements \code{obj}, \code{opt}, \code{rep}, \code{prep}, etc.

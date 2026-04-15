@@ -46,8 +46,17 @@ NULL
 #'   lognormal observation SD is estimated separately for each flag.
 #' @param control Control list passed to [stats::nlminb()].
 #' @param ncores Optional integer. If provided, sets the number of OpenMP threads. Passed to [TMB::openmp()].
-#' @param silent Logical. Passed to [TMB::MakeADFun()].
 #' @param ... Passed to [intCPUE::make_data()] (for example, `area_scale`).
+#' @param silent Logical. Passed to [TMB::MakeADFun()].
+#' @param restart_max Non-negative integer. Maximum number of automatic
+#'   `nlminb()` restarts attempted from the current best parameter vector when
+#'   convergence or gradient checks remain unsatisfactory.
+#' @param newton_max Non-negative integer. Maximum number of
+#'   [TMB::newton()] refinement attempts after `nlminb()`/restart stages.
+#' @param coord_max Non-negative integer. Maximum number of coordinate-polish
+#'   iterations attempted after the restart/Newton stages. Set
+#'   `restart_max = 0`, `newton_max = 0`, and `coord_max = 0` to run only a
+#'   single `nlminb()` pass.
 #'
 #' @return An object of class `intCPUE` with elements `obj`, `opt`, `rep`, `prep`, etc.
 #' @author Rujia Bi \email{rbi@@iattc.org}
@@ -66,12 +75,18 @@ intCPUE <- function(
     control = list(eval.max = 1e5, iter.max = 1e5),
     ncores = NULL,
     ...,
-    silent = FALSE
+    silent = FALSE,
+    restart_max = 1L,
+    newton_max = 2L,
+    coord_max = 5L
 ) {
   q_diffs_time <- match.arg(q_diffs_time)
   q_diffs_spatial <- match.arg(q_diffs_spatial)
   pop_spatiotemporal_type <- match.arg(pop_spatiotemporal_type)
   obs_sd <- match.arg(obs_sd)
+  restart_max <- .validate_nonneg_count(restart_max, "restart_max")
+  newton_max <- .validate_nonneg_count(newton_max, "newton_max")
+  coord_max <- .validate_nonneg_count(coord_max, "coord_max")
   
   data_utm <- as.data.frame(data_utm)
   
@@ -217,7 +232,13 @@ intCPUE <- function(
     silent = silent
   )
   
-  opt <- .safe_optimize(obj, control)
+  opt <- .safe_optimize(
+    obj = obj,
+    control = control,
+    restart_max = restart_max,
+    newton_max = newton_max,
+    coord_max = coord_max
+  )
   par_structured <- try(obj$env$parList(opt$par), silent = TRUE)
   if (!inherits(par_structured, "try-error")) {
     opt$par_list <- par_structured
@@ -244,7 +265,10 @@ intCPUE <- function(
       q_diffs_spatial = q_diffs_spatial,
       obs_sd = obs_sd,
       DLL = DLL,
-      ncores = ncores
+      ncores = ncores,
+      restart_max = restart_max,
+      newton_max = newton_max,
+      coord_max = coord_max
     ),
     diagnostics = list(
       convergence = opt$convergence,

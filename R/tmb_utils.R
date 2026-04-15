@@ -187,6 +187,19 @@
 
 # ---- 3) Optimization helpers ----------------------------------------------
 
+.validate_nonneg_count <- function(x, name) {
+  if (length(x) != 1L || is.na(x)) {
+    stop(sprintf("`%s` must be a single non-negative integer.", name), call. = FALSE)
+  }
+
+  x_num <- suppressWarnings(as.numeric(x))
+  if (!is.finite(x_num) || abs(x_num - round(x_num)) > 1e-9 || x_num < 0) {
+    stop(sprintf("`%s` must be a single non-negative integer.", name), call. = FALSE)
+  }
+
+  as.integer(round(x_num))
+}
+
 .max_grad_opt <- function(obj, par) {
   if (length(par) == 0L) {
     return(0)
@@ -342,18 +355,9 @@
   # NOTE:
   # Small wrapper around nlminb() with a couple of automatic restarts.
   # This helps when nlminb reports false convergence while gradients remain non-trivial.
-  restart_max <- as.integer(restart_max)
-  if (is.na(restart_max) || restart_max < 0L) {
-    restart_max <- 0L
-  }
-  newton_max <- as.integer(newton_max)
-  if (is.na(newton_max) || newton_max < 0L) {
-    newton_max <- 0L
-  }
-  coord_max <- as.integer(coord_max)
-  if (is.na(coord_max) || coord_max < 0L) {
-    coord_max <- 0L
-  }
+  restart_max <- .validate_nonneg_count(restart_max, "restart_max")
+  newton_max <- .validate_nonneg_count(newton_max, "newton_max")
+  coord_max <- .validate_nonneg_count(coord_max, "coord_max")
 
   opt <- .run_nlminb_once(obj = obj, start = obj$par, control = control)
   best_opt <- opt
