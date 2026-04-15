@@ -11,11 +11,7 @@ intCPUE(
   formula_catchability = NULL,
   formula_population = NULL,
   projection_data = NULL,
-  pop_spatial = c("on", "off"),
-  pop_spatiotemporal = c("on", "off"),
-  pop_spatiotemporal_type = c("rw", "iid", "ar1"),
-  vessel_effect = c("on", "off"),
-  q_diffs_system = c("on", "off"),
+  pop_spatiotemporal_type = c("rw", "ar1"),
   q_diffs_time = c("on", "off"),
   q_diffs_spatial = c("on", "off"),
   obs_sd = c("shared", "flag"),
@@ -50,20 +46,9 @@ one row per grid cell-time combination. If \code{formula_population} mixes
 static and time-varying covariates, use the grid cell-time format and
 repeat static covariate values across \code{tid}.}
 
-\item{pop_spatial}{"on" or "off". If "off", the population spatial field is
-fixed at 0.}
-
-\item{pop_spatiotemporal}{"on" or "off". If "off", the population
-spatiotemporal field is fixed at 0.}
-
-\item{pop_spatiotemporal_type}{One of \code{"rw"}, \code{"iid"}, or \code{"ar1"}.
-Controls the temporal dependence structure of the population
-spatiotemporal field when \code{pop_spatiotemporal = "on"}. Defaults to \code{"rw"}
-to preserve the previous model behavior.}
-
-\item{vessel_effect}{"on" or "off". If "off", vessel RE is fixed at 0 via map.}
-
-\item{q_diffs_system}{"on" or "off". If "off", flag systematic differences are fixed.}
+\item{pop_spatiotemporal_type}{\code{"rw"} or \code{"ar1"}. Controls whether the
+always-on spatiotemporal population field follows a random-walk or AR1
+evolution over time.}
 
 \item{q_diffs_time}{"on" or "off". If "off", flag-specific temporal effects are fixed.}
 

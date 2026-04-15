@@ -34,7 +34,7 @@ The model supports:
 
 - mgcv-style `s()` smooth terms parsed into mixed-effects from inside TMB
 
-This is currently a Poisson-link delta model. The baseline population surface is always driven by temporal effects, with optional spatial (`pop_spatial`) and spatiotemporal (`pop_spatiotemporal`) random fields. Smooth terms can be assigned either to catchability only or to the population layer. Population-layer smooths are included both in the observation model and in projection, so they affect the standardized index.
+This is currently a Poisson-link delta model. The baseline population surface is always driven by temporal effects together with spatial and spatiotemporal random fields. Vessel effects and systematic fishery differences are part of the core model. The user-facing switches currently control the spatiotemporal population evolution type (`pop_spatiotemporal_type`), the time-varying and spatial fishery-specific catchability deviations (`q_diffs_time`, `q_diffs_spatial`), and the observation-SD structure (`obs_sd`). Smooth terms can be assigned either to catchability only or to the population layer. Population-layer smooths are included both in the observation model and in projection, so they affect the standardized index.
 
 Here provides a minimal workflow: install → data preparation → coordinate projection → mesh → model fitting → index extraction.
 
@@ -155,9 +155,9 @@ Both encounter and positive components include:
 
 - fixed temporal effects (`tid`, as intercepts)
 
-- optional spatial random field (`omega`)
+- spatial random field (`omega`)
 
-- optional spatiotemporal random field (`epsilon`)
+- spatiotemporal random field (`epsilon`)
 
 `formula_catchability` adds smooth covariates that affect catchability only.
 
@@ -182,11 +182,7 @@ fit <- intCPUE(
   formula_catchability = formula_catchability,
   data_utm = data_utm,
   mesh = mesh,
-  pop_spatial = "on",
-  pop_spatiotemporal = "on",
   pop_spatiotemporal_type = "rw",
-  vessel_effect = "off",
-  q_diffs_system = "off",  
   q_diffs_time = "off",  
   q_diffs_spatial = "off",
   obs_sd = "shared",
@@ -194,19 +190,19 @@ fit <- intCPUE(
 )
 ```
 
-## Population components
+## Core model components
 
-* `pop_spatial` — turns the population spatial field on or off
+* `pop_spatiotemporal_type` — temporal dependence for the population spatiotemporal field (`"rw"` or `"ar1"`)
 
-* `pop_spatiotemporal` — turns the population spatiotemporal field on or off
+The current package version fits a fixed core model with:
 
-* `pop_spatiotemporal_type` — temporal dependence for the population spatiotemporal field (`"rw"`, `"iid"`, or `"ar1"`)
+* population spatial and spatiotemporal random fields turned on
 
-## Catchability components
+* vessel effects turned on
 
-* `vessel_effect` — vessel-level random effect, modeled as \(N(0, \sigma^2)\), affecting catchability
+* systematic fishery catchability differences turned on
 
-* `q_diffs_system` — systematic catchability difference among fisheries (i.e., factor effect)
+## User-facing switches
 
 * `q_diffs_time` — time-varying catchability difference 
 

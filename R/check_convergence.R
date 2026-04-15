@@ -16,6 +16,10 @@ check_convergence <- function(object) {
   data.frame(
     convergence = object$opt$convergence,
     message = object$opt$message,
-    max_grad = max(abs(object$obj$gr(object$opt$par)))
+    max_grad = if (!is.null(object$opt$max_grad)) {
+      object$opt$max_grad
+    } else {
+      max(abs(object$obj$gr(object$opt$par)))
+    }
   )
 }

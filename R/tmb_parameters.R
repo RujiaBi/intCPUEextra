@@ -34,6 +34,9 @@
     n_v,
     n_f,
     n_s,
+    n_flag_t_free = 0L,
+    use_q_diffs_time = TRUE,
+    use_q_diffs_spatial = TRUE,
     K_smooth_catch = 0L,
     n_smooth_catch = 0L,
     sum_k_catch = 0L,
@@ -52,6 +55,12 @@
   # Using 0.0 is standard: it corresponds to neutral effects on log/logit scales.
   empty_mat <- function(nr, nc) {
     matrix(0.0, nrow = nr, ncol = nc)
+  }
+  zero_or_vec <- function(flag, n) {
+    if (isTRUE(flag) && n > 0L) rep(0.0, n) else numeric(0)
+  }
+  zero_or_mat <- function(flag, nr, nc) {
+    if (isTRUE(flag) && nr > 0L && nc > 0L) empty_mat(nr, nc) else matrix(0.0, nrow = 0L, ncol = 0L)
   }
   
   # ------------------------------------------------------------
@@ -92,7 +101,7 @@
     # Vessel random effects (two components)
     # ==========================================================
     # Vessel-level intercept deviations (one per vessel), typically iid N(0, sd^2).
-    # If vessel_effect="off", these are fixed at 0 by map in fit().
+    # Vessel effects are part of the fixed core architecture in the current package design.
     ves_v_1 = rep(0.0, n_v),
     ves_v_2 = rep(0.0, n_v),
     # Log SD for vessel effects (one per component).
@@ -134,10 +143,10 @@
     # ==========================================================
     # Flag temporal differences (relative to baseline flag = 0)
     # ==========================================================
-    # flag_t_* : (n_t x (n_f-1)) matrix. Each column is a flag-specific time series.
-    # In fit(), partially fix missing (t, flag) cells to 0 using has_tf.
-    flag_t_1 = empty_mat(n_t, max(0L, n_f - 1L)),
-    flag_t_2 = empty_mat(n_t, max(0L, n_f - 1L)),
+    # flag_t_* : free coefficients only for observed, non-reference flag-time cells.
+    # Missing cells and the first observed time per flag are reconstructed in C++ as 0.
+    flag_t_1 = zero_or_vec(use_q_diffs_time, n_flag_t_free),
+    flag_t_2 = zero_or_vec(use_q_diffs_time, n_flag_t_free),
     
     # Log SD for flag temporal differences (per component).
     # If no flags are estimable, fit() may map these to NA to fix variance at 0.
@@ -149,8 +158,8 @@
     # ==========================================================
     # flag_s_* : (n_s x (n_f-1)) matrix. Each column is a flag-specific spatial field.
     # SD handled via ln_sigma_flag_* above (component-specific).
-    flag_s_1 = empty_mat(n_s, max(0L, n_f - 1L)),
-    flag_s_2 = empty_mat(n_s, max(0L, n_f - 1L)),
+    flag_s_1 = zero_or_mat(use_q_diffs_spatial, n_s, max(0L, n_f - 1L)),
+    flag_s_2 = zero_or_mat(use_q_diffs_spatial, n_s, max(0L, n_f - 1L)),
     
     # flag spatial-diff field SD
     ln_sigma_flag_1 = 0.0,  

@@ -33,18 +33,15 @@ NULL
 #'   one row per grid cell-time combination. If `formula_population` mixes
 #'   static and time-varying covariates, use the grid cell-time format and
 #'   repeat static covariate values across `tid`.
-#' @param pop_spatial "on" or "off". If "off", the population spatial field is
-#'   fixed at 0.
-#' @param pop_spatiotemporal "on" or "off". If "off", the population
-#'   spatiotemporal field is fixed at 0.
-#' @param pop_spatiotemporal_type One of `"rw"`, `"iid"`, or `"ar1"`.
-#'   Controls the temporal dependence structure of the population
-#'   spatiotemporal field when `pop_spatiotemporal = "on"`. Defaults to `"rw"`
-#'   to preserve the previous model behavior.
-#' @param vessel_effect "on" or "off". If "off", vessel RE is fixed at 0 via map.
-#' @param q_diffs_system "on" or "off". If "off", flag systematic differences are fixed.
-#' @param q_diffs_time "on" or "off". If "off", flag-specific temporal effects are fixed.
-#' @param q_diffs_spatial "on" or "off". If "off", flag-specific spatial fields are fixed.
+#' @param q_diffs_time "on" or "off". Controls whether flag-specific temporal
+#'   deviations are included. Implemented via dedicated TMB templates rather
+#'   than `map`.
+#' @param q_diffs_spatial "on" or "off". Controls whether flag-specific spatial
+#'   deviations are included. Implemented via dedicated TMB templates rather
+#'   than `map`.
+#' @param pop_spatiotemporal_type `"rw"` or `"ar1"`. Controls whether the
+#'   always-on spatiotemporal population field follows a random-walk or AR1
+#'   evolution over time.
 #' @param obs_sd `"shared"` or `"flag"`. If `"flag"`, the positive-catch
 #'   lognormal observation SD is estimated separately for each flag.
 #' @param control Control list passed to [stats::nlminb()].
@@ -62,26 +59,18 @@ intCPUE <- function(
     formula_catchability = NULL,
     formula_population = NULL,
     projection_data = NULL,
-    pop_spatial = c("on", "off"),
-    pop_spatiotemporal = c("on", "off"),
-    pop_spatiotemporal_type = c("rw", "iid", "ar1"),
-    vessel_effect = c("on", "off"),
-    q_diffs_system = c("on", "off"),
     q_diffs_time = c("on", "off"),
     q_diffs_spatial = c("on", "off"),
+    pop_spatiotemporal_type = c("rw", "ar1"),
     obs_sd = c("shared", "flag"),
     control = list(eval.max = 1e5, iter.max = 1e5),
     ncores = NULL,
     ...,
     silent = FALSE
 ) {
-  pop_spatial <- match.arg(pop_spatial)
-  pop_spatiotemporal <- match.arg(pop_spatiotemporal)
-  pop_spatiotemporal_type <- match.arg(pop_spatiotemporal_type)
-  vessel_effect   <- match.arg(vessel_effect)
-  q_diffs_system  <- match.arg(q_diffs_system)
-  q_diffs_time    <- match.arg(q_diffs_time)
+  q_diffs_time <- match.arg(q_diffs_time)
   q_diffs_spatial <- match.arg(q_diffs_spatial)
+  pop_spatiotemporal_type <- match.arg(pop_spatiotemporal_type)
   obs_sd <- match.arg(obs_sd)
   
   data_utm <- as.data.frame(data_utm)
@@ -105,19 +94,25 @@ intCPUE <- function(
   n_f <- data_tmb$n_f
   n_s <- data_tmb$spde$n_s
 
-  data_tmb$use_vessel_effect <- as.integer(vessel_effect == "on" && n_v > 0L)
-  data_tmb$use_pop_spatial <- as.integer(pop_spatial == "on")
-  data_tmb$use_pop_spatiotemporal <- as.integer(pop_spatiotemporal == "on" && n_t > 0L)
-  data_tmb$use_pop_spatiotemporal_rw <- as.integer(
-    pop_spatiotemporal == "on" && pop_spatiotemporal_type == "rw" && n_t > 0L
-  )
-  data_tmb$use_pop_spatiotemporal_ar1 <- as.integer(
-    pop_spatiotemporal == "on" && pop_spatiotemporal_type == "ar1" && n_t > 0L
-  )
-  data_tmb$use_q_diffs_system <- as.integer(q_diffs_system == "on" && n_f > 1L)
   data_tmb$use_q_diffs_time <- as.integer(q_diffs_time == "on" && n_f > 1L)
   data_tmb$use_q_diffs_spatial <- as.integer(q_diffs_spatial == "on" && n_f > 1L)
+  data_tmb$use_pop_spatiotemporal_rw <- as.integer(pop_spatiotemporal_type == "rw")
+  data_tmb$use_pop_spatiotemporal_ar1 <- as.integer(pop_spatiotemporal_type == "ar1")
   data_tmb$use_flag_sd <- as.integer(obs_sd == "flag" && n_f > 0L)
+
+  has_tf <- NULL
+  flag_t_constraint <- NULL
+  if (q_diffs_time == "on" && n_f > 1L) {
+    has_tf <- data_tmb$has_tf > 0L
+    flag_t_constraint <- .build_flag_t_constraint(has_tf)
+    data_tmb$flag_t_index <- matrix(
+      as.integer(flag_t_constraint$flag_t_index),
+      nrow = nrow(flag_t_constraint$flag_t_index),
+      ncol = ncol(flag_t_constraint$flag_t_index)
+    )
+  } else {
+    data_tmb$flag_t_index <- matrix(integer(0), nrow = 0L, ncol = max(0L, n_f - 1L))
+  }
   
   # Smooth dims
   has_smooths_catch <- isTRUE(data_tmb$has_smooths_catch == 1L)
@@ -133,6 +128,9 @@ intCPUE <- function(
   # ---- 3) Initial parameters (must match cpp) ----
   parameters <- .make_parameters_intCPUE(
     n_t = n_t, n_v = n_v, n_f = n_f, n_s = n_s,
+    n_flag_t_free = if (is.null(flag_t_constraint)) 0L else flag_t_constraint$n_free,
+    use_q_diffs_time = (q_diffs_time == "on" && n_f > 1L),
+    use_q_diffs_spatial = (q_diffs_spatial == "on" && n_f > 1L),
     K_smooth_catch = K_smooth_catch,
     n_smooth_catch = n_smooth_catch,
     sum_k_catch = sum_k_catch,
@@ -140,45 +138,43 @@ intCPUE <- function(
     n_smooth_pop = n_smooth_pop,
     sum_k_pop = sum_k_pop
   )
-  
-  # ---- 4) MAP (turn on/off components without touching cpp) ----
-  has_tf <- NULL
-  if (!is.null(data_tmb$has_tf)) {
-    # has_tf is integer matrix 0/1 in your make_data()
-    has_tf <- (data_tmb$has_tf > 0L)
+
+  # Match the active TMB template exactly: q-time/q-spatial parameters do not
+  # exist at all in the corresponding off-templates.
+  if (q_diffs_time == "off" || n_f <= 1L) {
+    parameters$flag_t_1 <- NULL
+    parameters$flag_t_2 <- NULL
+    parameters$flag_t_ln_std_dev_1 <- NULL
+    parameters$flag_t_ln_std_dev_2 <- NULL
+  }
+  if (q_diffs_spatial == "off" || n_f <= 1L) {
+    parameters$flag_s_1 <- NULL
+    parameters$flag_s_2 <- NULL
+    parameters$ln_sigma_flag_1 <- NULL
+    parameters$ln_sigma_flag_2 <- NULL
   }
   
+  # ---- 4) MAP (turn on/off components without touching cpp) ----
   map <- .make_map_intCPUE(
     parameters = parameters,
     n_f = n_f,
-    pop_spatial = pop_spatial,
-    pop_spatiotemporal = pop_spatiotemporal,
-    pop_spatiotemporal_type = pop_spatiotemporal_type,
-    vessel_effect = vessel_effect,
-    q_diffs_system = q_diffs_system,
-    q_diffs_time = q_diffs_time,
-    q_diffs_spatial = q_diffs_spatial,
     obs_sd = obs_sd,
-    has_tf = has_tf
+    q_diffs_time = q_diffs_time,
+    has_tf = has_tf,
+    estimable_flag = if (is.null(flag_t_constraint)) NULL else flag_t_constraint$estimable_flag
   )
   
   # ---- 5) Random effects list ----
   random <- character(0)
 
-  if (pop_spatial == "on") {
-    random <- c(random, "omega_s_1", "omega_s_2")
-  }
+  random <- c(random, "omega_s_1", "omega_s_2")
+  random <- c(random, "epsilon_st_1", "epsilon_st_2")
 
-  if (pop_spatiotemporal == "on") {
-    random <- c(random, "epsilon_st_1", "epsilon_st_2")
-  }
-  
-  if (vessel_effect == "on") {
+  if (n_v > 0L) {
     random <- c(random, "ves_v_1", "ves_v_2")
   }
   
-  # Only include these if flags exist:
-  if (n_f > 1L && q_diffs_system == "on") {
+  if (n_f > 1L) {
     random <- c(random, "flag_f_1", "flag_f_2")
   }
   if (n_f > 1L && q_diffs_time == "on") {
@@ -197,7 +193,10 @@ intCPUE <- function(
   # ---- 6) Build & optimize ----
   .check_fit_inputs_intCPUE(data_tmb)
   
-  DLL <- "intCPUE"
+  DLL <- .ensure_template_dll_intCPUE(
+    q_diffs_time = q_diffs_time,
+    q_diffs_spatial = q_diffs_spatial
+  )
   
   if (!is.null(ncores)) {
     ncores <- as.integer(ncores)
@@ -219,8 +218,13 @@ intCPUE <- function(
   )
   
   opt <- .safe_optimize(obj, control)
+  par_structured <- try(obj$env$parList(opt$par), silent = TRUE)
+  if (!inherits(par_structured, "try-error")) {
+    opt$par_list <- par_structured
+  }
   
-  rep <- TMB::sdreport(obj)
+  rep_info <- .safe_sdreport(obj, opt)
+  rep <- rep_info$rep
   
   out <- list(
     obj = obj,
@@ -235,11 +239,7 @@ intCPUE <- function(
       formula = formula,
       formula_catchability = if (is.null(formula_catchability)) formula else formula_catchability,
       formula_population = formula_population,
-      pop_spatial = pop_spatial,
-      pop_spatiotemporal = pop_spatiotemporal,
       pop_spatiotemporal_type = pop_spatiotemporal_type,
-      vessel_effect = vessel_effect,
-      q_diffs_system = q_diffs_system,
       q_diffs_time = q_diffs_time,
       q_diffs_spatial = q_diffs_spatial,
       obs_sd = obs_sd,
@@ -249,7 +249,11 @@ intCPUE <- function(
     diagnostics = list(
       convergence = opt$convergence,
       message = opt$message,
-      max_grad = max(abs(obj$gr(opt$par)))
+      max_grad = if (!is.null(opt$max_grad)) opt$max_grad else max(abs(obj$gr(opt$par))),
+      newton_used = if (!is.null(opt$newton_used)) opt$newton_used else NA_integer_,
+      coord_used = if (!is.null(opt$coord_used)) opt$coord_used else NA_integer_,
+      sdreport_method = rep_info$method,
+      sdreport_error = rep_info$error
     )
   )
   class(out) <- "intCPUE"

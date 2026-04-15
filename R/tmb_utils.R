@@ -187,29 +187,347 @@
 
 # ---- 3) Optimization helpers ----------------------------------------------
 
-.safe_optimize <- function(obj, control) {
-  # NOTE:
-  # Small wrapper around nlminb() that returns the result and warns on non-zero convergence.
-  # You can expand later to do:
-  # - optimizer restarts
-  # - Newton steps
-  # - gradient checks
-  opt <- stats::nlminb(
-    start     = obj$par,
+.max_grad_opt <- function(obj, par) {
+  if (length(par) == 0L) {
+    return(0)
+  }
+  max(abs(obj$gr(par)))
+}
+
+.safe_fn_eval <- function(obj, par) {
+  val <- try(obj$fn(par), silent = TRUE)
+  if (inherits(val, "try-error") || !is.finite(val)) {
+    return(Inf)
+  }
+  val
+}
+
+.safe_gr_eval <- function(obj, par) {
+  gr <- try(obj$gr(par), silent = TRUE)
+  if (inherits(gr, "try-error") || any(!is.finite(gr))) {
+    return(NULL)
+  }
+  gr
+}
+
+.run_nlminb_once <- function(obj, start, control) {
+  stats::nlminb(
+    start     = start,
     objective = obj$fn,
     gradient  = obj$gr,
     control   = control
   )
-  
-  if (!is.null(opt$convergence) && opt$convergence != 0) {
-    msg <- if (!is.null(opt$message)) opt$message else "no message"
-    warning(
-      sprintf("Optimizer may not have converged (convergence=%s): %s", opt$convergence, msg),
-      call. = FALSE
-    )
+}
+
+.should_restart_optimize <- function(opt, grad, grad_tol) {
+  bad_conv <- !is.null(opt$convergence) && opt$convergence != 0
+  bad_grad <- is.finite(grad) && grad > grad_tol
+  bad_conv || bad_grad
+}
+
+.try_newton_refine <- function(obj, start, grad_tol, trace = 0L) {
+  if (!is.function(obj$fn) || !is.function(obj$gr) || !is.function(obj$he)) {
+    return(list(ok = FALSE, result = NULL, error = "Missing fn/gr/he on TMB object."))
   }
-  
-  opt
+  if (length(start) == 0L) {
+    return(list(ok = FALSE, result = NULL, error = "Empty parameter vector."))
+  }
+
+  he_sparse <- function(par) {
+    Matrix::Matrix(obj$he(par), sparse = TRUE)
+  }
+
+  out <- tryCatch(
+    TMB::newton(
+      par = start,
+      fn = obj$fn,
+      gr = obj$gr,
+      he = he_sparse,
+      trace = as.integer(trace),
+      maxit = 50,
+      tol = grad_tol,
+      grad.tol = grad_tol,
+      step.tol = 1e-10,
+      tol10 = 1e-6,
+      smartsearch = TRUE
+    ),
+    error = function(e) e
+  )
+
+  if (inherits(out, "error")) {
+    return(list(ok = FALSE, result = NULL, error = conditionMessage(out)))
+  }
+
+  list(ok = TRUE, result = out, error = NULL)
+}
+
+.try_coordinate_refine <- function(obj, start, grad_tol, maxit = 5L, top_k = 5L) {
+  if (length(start) == 0L) {
+    return(NULL)
+  }
+
+  par <- start
+  best_value <- .safe_fn_eval(obj, par)
+  grad_vec <- .safe_gr_eval(obj, par)
+  if (!is.finite(best_value) || is.null(grad_vec)) {
+    return(NULL)
+  }
+
+  best_grad <- max(abs(grad_vec))
+  used <- 0L
+
+  for (iter in seq_len(maxit)) {
+    if (!is.finite(best_grad) || best_grad <= grad_tol) {
+      break
+    }
+
+    ord <- order(abs(grad_vec), decreasing = TRUE)
+    ord <- ord[seq_len(min(length(ord), max(1L, as.integer(top_k))))]
+    improved <- FALSE
+
+    for (idx in ord) {
+      base <- par[idx]
+      g_i <- grad_vec[idx]
+      step0 <- max(
+        1e-3,
+        0.1 * max(1, abs(base)),
+        0.05 * abs(g_i)
+      )
+      deltas <- step0 * c(-4, -2, -1, -0.5, 0.5, 1, 2, 4)
+
+      cand_vals <- rep(Inf, length(deltas))
+      cand_pars <- vector("list", length(deltas))
+      for (k in seq_along(deltas)) {
+        par_k <- par
+        par_k[idx] <- base + deltas[k]
+        cand_pars[[k]] <- par_k
+        cand_vals[k] <- .safe_fn_eval(obj, par_k)
+      }
+
+      k_best <- which.min(cand_vals)
+      if (length(k_best) == 0L || !is.finite(cand_vals[k_best])) {
+        next
+      }
+
+      if (cand_vals[k_best] < best_value - 1e-8) {
+        par <- cand_pars[[k_best]]
+        best_value <- cand_vals[k_best]
+        grad_vec_new <- .safe_gr_eval(obj, par)
+        if (is.null(grad_vec_new)) {
+          return(NULL)
+        }
+        grad_vec <- grad_vec_new
+        best_grad <- max(abs(grad_vec))
+        used <- used + 1L
+        improved <- TRUE
+        break
+      }
+    }
+
+    if (!improved) {
+      break
+    }
+  }
+
+  list(
+    par = par,
+    value = best_value,
+    gradient = grad_vec,
+    max_grad = best_grad,
+    used = used
+  )
+}
+
+.safe_optimize <- function(obj, control, restart_max = 1L, grad_tol = 1e-3, newton_max = 2L, coord_max = 5L) {
+  # NOTE:
+  # Small wrapper around nlminb() with a couple of automatic restarts.
+  # This helps when nlminb reports false convergence while gradients remain non-trivial.
+  restart_max <- as.integer(restart_max)
+  if (is.na(restart_max) || restart_max < 0L) {
+    restart_max <- 0L
+  }
+  newton_max <- as.integer(newton_max)
+  if (is.na(newton_max) || newton_max < 0L) {
+    newton_max <- 0L
+  }
+  coord_max <- as.integer(coord_max)
+  if (is.na(coord_max) || coord_max < 0L) {
+    coord_max <- 0L
+  }
+
+  opt <- .run_nlminb_once(obj = obj, start = obj$par, control = control)
+  best_opt <- opt
+  best_grad <- .max_grad_opt(obj, best_opt$par)
+  newton_used <- 0L
+  coord_used <- 0L
+  newton_attempted <- 0L
+  coord_attempted <- 0L
+  newton_error <- NULL
+  coord_error <- NULL
+
+  if (restart_max > 0L && .should_restart_optimize(best_opt, best_grad, grad_tol)) {
+    for (iter in seq_len(restart_max)) {
+      restart_opt <- .run_nlminb_once(
+        obj = obj,
+        start = best_opt$par,
+        control = control
+      )
+      restart_grad <- .max_grad_opt(obj, restart_opt$par)
+
+      better_value <- is.finite(restart_opt$objective) &&
+        (!is.finite(best_opt$objective) || restart_opt$objective < best_opt$objective - 1e-8)
+      better_grad <- is.finite(restart_grad) &&
+        (!is.finite(best_grad) || restart_grad < best_grad - 1e-8)
+      better_conv <- !is.null(best_opt$convergence) &&
+        !is.null(restart_opt$convergence) &&
+        restart_opt$convergence < best_opt$convergence
+
+      if (better_value || better_grad || better_conv) {
+        best_opt <- restart_opt
+        best_grad <- restart_grad
+      } else {
+        break
+      }
+
+      if (!.should_restart_optimize(best_opt, best_grad, grad_tol)) {
+        break
+      }
+    }
+  }
+
+  if (.should_restart_optimize(best_opt, best_grad, grad_tol) && newton_max > 0L) {
+    for (iter in seq_len(newton_max)) {
+      newton_attempted <- newton_attempted + 1L
+      newton_opt <- .try_newton_refine(
+        obj = obj,
+        start = best_opt$par,
+        grad_tol = grad_tol,
+        trace = 0L
+      )
+
+      if (!isTRUE(newton_opt$ok)) {
+        newton_error <- newton_opt$error
+        break
+      }
+      newton_res <- newton_opt$result
+
+      newton_grad <- max(abs(newton_res$gradient))
+      better_value <- is.finite(newton_res$value) &&
+        (!is.finite(best_opt$objective) || newton_res$value < best_opt$objective - 1e-8)
+      better_grad <- is.finite(newton_grad) &&
+        (!is.finite(best_grad) || newton_grad < best_grad - 1e-8)
+
+      if (!(better_value || better_grad)) {
+        break
+      }
+
+      best_opt$par <- newton_res$par
+      best_opt$objective <- newton_res$value
+      best_opt$max_grad <- newton_grad
+      best_opt$convergence <- if (newton_grad <= grad_tol) 0L else best_opt$convergence
+      best_grad <- newton_grad
+      newton_used <- iter
+
+      if (!.should_restart_optimize(best_opt, best_grad, grad_tol)) {
+        break
+      }
+    }
+
+    if (newton_used > 0L) {
+      msg <- if (!is.null(best_opt$message)) best_opt$message else "no message"
+      best_opt$message <- paste0(msg, "; refined with TMB::newton x", newton_used)
+    }
+  }
+
+  if (.should_restart_optimize(best_opt, best_grad, grad_tol) && coord_max > 0L) {
+    coord_attempted <- 1L
+    coord_opt <- .try_coordinate_refine(
+      obj = obj,
+      start = best_opt$par,
+      grad_tol = grad_tol,
+      maxit = coord_max,
+      top_k = 5L
+    )
+
+    if (!is.null(coord_opt) && coord_opt$used > 0L) {
+      coord_grad <- coord_opt$max_grad
+      better_value <- is.finite(coord_opt$value) &&
+        (!is.finite(best_opt$objective) || coord_opt$value < best_opt$objective - 1e-8)
+      better_grad <- is.finite(coord_grad) &&
+        (!is.finite(best_grad) || coord_grad < best_grad - 1e-8)
+
+      if (better_value || better_grad) {
+        best_opt$par <- coord_opt$par
+        best_opt$objective <- coord_opt$value
+        best_opt$max_grad <- coord_grad
+        best_opt$convergence <- if (coord_grad <= grad_tol) 0L else best_opt$convergence
+        best_grad <- coord_grad
+        coord_used <- coord_opt$used
+        msg <- if (!is.null(best_opt$message)) best_opt$message else "no message"
+        best_opt$message <- paste0(msg, "; refined with coordinate-polish x", coord_used)
+      }
+    } else if (is.null(coord_opt)) {
+      coord_error <- "Coordinate polish failed to obtain a usable objective/gradient path."
+    }
+  }
+
+  best_opt$max_grad <- best_grad
+  best_opt$newton_used <- newton_used
+  best_opt$coord_used <- coord_used
+  best_opt$newton_attempted <- newton_attempted
+  best_opt$coord_attempted <- coord_attempted
+  best_opt$newton_error <- newton_error
+  best_opt$coord_error <- coord_error
+
+  if ((!is.null(best_opt$convergence) && best_opt$convergence != 0) || best_grad > grad_tol) {
+    msg <- if (!is.null(best_opt$message)) best_opt$message else "no message"
+    if (!is.null(best_opt$convergence) && best_opt$convergence == 0 && best_grad > grad_tol) {
+      warning(
+        sprintf(
+          paste0(
+            "Optimizer stopped with convergence=0, but max_grad=%.6g exceeds ",
+            "the intCPUE tolerance %.6g; treating this as not fully converged. ",
+            "nlminb message: %s"
+          ),
+          best_grad,
+          grad_tol,
+          msg
+        ),
+        call. = FALSE
+      )
+    } else {
+      warning(
+        sprintf(
+          "Optimizer may not have converged (convergence=%s, max_grad=%.6g): %s",
+          best_opt$convergence,
+          best_grad,
+          msg
+        ),
+        call. = FALSE
+      )
+    }
+  }
+
+  best_opt
+}
+
+.safe_sdreport <- function(obj, opt) {
+  rep_default <- try(TMB::sdreport(obj), silent = TRUE)
+  if (!inherits(rep_default, "try-error")) {
+    return(list(
+      rep = rep_default,
+      method = "default",
+      error = NULL
+    ))
+  }
+
+  default_msg <- conditionMessage(attr(rep_default, "condition"))
+
+  list(
+    rep = NULL,
+    method = "failed",
+    error = paste0("Default sdreport failed: ", default_msg)
+  )
 }
 
 # ---- 4) Debug helpers ------------------------------------------------------

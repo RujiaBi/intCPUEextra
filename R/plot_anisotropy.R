@@ -41,19 +41,6 @@ plot_anisotropy <- function(
     rep_obj <- try(object$obj$report(par_best), silent = TRUE)
   }
 
-  if (!inherits(rep_obj, "try-error") && !is.null(rep_obj)) {
-    use_cols <- c("use_pop_spatial", "use_pop_spatiotemporal", "use_q_diffs_spatial")
-    if (all(use_cols %in% names(rep_obj))) {
-      has_spatial_component <- any(as.integer(unlist(rep_obj[use_cols])) == 1L)
-      if (!has_spatial_component) {
-        stop(
-          "No spatial or spatially varying component is active in this fitted model, so anisotropy is not defined.",
-          call. = FALSE
-        )
-      }
-    }
-  }
-
   ln_H_input <- as.numeric(par_best[grep("^ln_H_input", names(par_best))])
   if (length(ln_H_input) != 2L) {
     stop("Could not find the two anisotropy parameters `ln_H_input`.", call. = FALSE)

@@ -3,8 +3,12 @@
 *.dll
 *.a
 *.lib
+*.Rcheck/
 *.Rproj.user
 inst/doc
+inst/tmb/*.dll
+inst/tmb/*.so
+inst/tmb/*.dylib
 .Rproj.user
 .DS_Store
 *.tar.gz
