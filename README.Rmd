@@ -77,7 +77,7 @@ Once a paper or DOI is available, this section will be updated.
 ## Installation
 
 ```r
-remotes::install_local(".")
+remotes::install_github("RujiaBi/intCPUEextra")
 ```
 
 ```r
