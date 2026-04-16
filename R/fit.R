@@ -123,6 +123,7 @@ intCPUE <- function(
     projection_data = projection_data,
     area_col = area_col,
     flag_mesh = flag_mesh,
+    q_diffs_spatial = q_diffs_spatial,
     ...
   )
   

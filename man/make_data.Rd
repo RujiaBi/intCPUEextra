@@ -13,7 +13,8 @@ make_data(
   projection_data = NULL,
   area_scale = "auto",
   area_col = NULL,
-  flag_mesh = NULL
+  flag_mesh = NULL,
+  q_diffs_spatial = c("on", "off")
 )
 }
 \arguments{
@@ -58,6 +59,10 @@ in multi-area mode.}
 \item{flag_mesh}{Optional dedicated mesh for the shared flag-specific
 spatial field (\code{flag_s}). When fitting multiple areas and enabling
 \code{q_diffs_spatial}, supply a single full-domain mesh here.}
+
+\item{q_diffs_spatial}{\code{"on"} or \code{"off"}. When \code{"off"}, \code{make_data()}
+skips construction of the dedicated \code{flag_s} mesh/SPDE objects and
+returns lightweight placeholders instead.}
 }
 \value{
 A list with elements mesh, data, key, scales, smooth_basis, smooth_info.

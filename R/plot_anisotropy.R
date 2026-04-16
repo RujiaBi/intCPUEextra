@@ -53,13 +53,16 @@ plot_anisotropy <- function(
     nm_range <- paste0("ln_range_", idx)
     nm_kappa <- paste0("ln_kappa_", idx)
 
-    if (nm_range %in% names(par_best)) {
-      vals <- exp(unname(par_best[[nm_range]]))
+    keep_range <- grepl(paste0("^", nm_range, "$"), names(par_best))
+    if (any(keep_range)) {
+      vals <- exp(unname(par_best[keep_range]))
       if (length(vals) == 1L && n_a > 1L) vals <- rep(vals, n_a)
       return(vals)
     }
-    if (nm_kappa %in% names(par_best)) {
-      vals <- sqrt(8.0) / exp(unname(par_best[[nm_kappa]]))
+
+    keep_kappa <- grepl(paste0("^", nm_kappa, "$"), names(par_best))
+    if (any(keep_kappa)) {
+      vals <- sqrt(8.0) / exp(unname(par_best[keep_kappa]))
       if (length(vals) == 1L && n_a > 1L) vals <- rep(vals, n_a)
       return(vals)
     }

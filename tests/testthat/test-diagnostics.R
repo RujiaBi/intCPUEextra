@@ -297,3 +297,37 @@ test_that("plot_index keeps areas as separate grouped series", {
   expect_s3_class(p, "ggplot")
   expect_equal(length(unique(ggplot2::ggplot_build(p)$data[[1]]$group)), 2L)
 })
+
+test_that("plot_anisotropy uses area-specific ranges in multi-area fits", {
+  skip_if_not_installed("ggplot2")
+
+  par_best <- c(
+    ln_H_input = 0,
+    ln_H_input = 0,
+    ln_H_input = 0,
+    ln_H_input = 0,
+    ln_range_1 = log(1),
+    ln_range_1 = log(3),
+    ln_range_2 = log(2),
+    ln_range_2 = log(4)
+  )
+
+  fake_fit <- list(
+    obj = list(env = list(last.par.best = par_best)),
+    prep = list(area_levels = c("A", "B"))
+  )
+  class(fake_fit) <- "intCPUE"
+
+  p <- plot_anisotropy(fake_fit, n_points = 41L)
+  expect_s3_class(p, "ggplot")
+
+  built <- ggplot2::ggplot_build(p)
+  ellipse_df <- built$data[[1]]
+  panel_map <- built$layout$layout[, c("PANEL", "areaid")]
+  panel_a <- panel_map$PANEL[panel_map$areaid == "A"][1]
+  panel_b <- panel_map$PANEL[panel_map$areaid == "B"][1]
+  area_a <- subset(ellipse_df, PANEL == panel_a)
+  area_b <- subset(ellipse_df, PANEL == panel_b)
+
+  expect_gt(max(sqrt(area_b$x^2 + area_b$y^2)), max(sqrt(area_a$x^2 + area_a$y^2)))
+})

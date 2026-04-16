@@ -114,6 +114,51 @@ test_that("multi-area q_diffs_spatial requires a dedicated flag mesh", {
   )
 })
 
+test_that("make_data skips dedicated flag mesh objects when q_diffs_spatial is off", {
+  skip_if_not_installed("sf")
+  skip_if_not_installed("fmesher")
+
+  data_input <- data.frame(
+    cpue = c(1.2, 0, 0.8, 1.1, 0, 0.7, 0.9, 0),
+    encounter = c(1L, 0L, 1L, 1L, 0L, 1L, 1L, 0L),
+    lon = c(150.0, 150.1, 150.2, 150.3, 160.0, 160.1, 160.2, 160.3),
+    lat = c(40.0, 40.0, 40.1, 40.1, 35.0, 35.0, 35.1, 35.1),
+    vesid = rep(0:1, 4),
+    tid = rep(0:1, each = 4),
+    flagid = rep(c(0L, 1L), 4),
+    region = rep(c("A", "B"), 4)
+  )
+
+  utm <- make_utm(data_input, utm_zone = NULL, coord_scale = "auto")
+  data_utm <- utm$data_utm
+  area_levels <- unique(as.character(data_utm$region))
+  mesh <- setNames(
+    lapply(area_levels, function(a) {
+      make_mesh(
+        data_utm[data_utm$region == a, ],
+        xy_cols = c("utm_x_scale", "utm_y_scale"),
+        type = "cutoff",
+        cutoff = 0.2
+      )
+    }),
+    area_levels
+  )
+
+  prep <- make_data(
+    data_utm = data_utm,
+    mesh = mesh,
+    area_col = "region",
+    q_diffs_spatial = "off"
+  )
+
+  expect_equal(prep$data$n_s_flag, 0L)
+  expect_true(inherits(prep$data$A_flag_is, "sparseMatrix"))
+  expect_equal(dim(prep$data$A_flag_is), c(nrow(data_utm), 0L))
+  expect_length(prep$data$flag_spde, 0L)
+  expect_length(prep$data$matern_range_flag, 0L)
+  expect_length(prep$data$matern_sigma_flag, 0L)
+})
+
 test_that("observation-SD mapping is honored", {
   parameters <- intCPUEextra:::.make_parameters_intCPUE(
     n_a = 1L,

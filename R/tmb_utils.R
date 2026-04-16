@@ -52,17 +52,21 @@
   # If it passes, indices and core objects are consistent with what the C++ code expects.
   # If it fails, fix in make_data() (NOT by patching indices manually).
   
+  use_flag_spatial <- isTRUE(!is.null(data_tmb$use_q_diffs_spatial) && as.integer(data_tmb$use_q_diffs_spatial) == 1L)
+
   # ---- required fields ----
   req <- c(
     "n_a","n_i","n_t","n_v","n_f","n_g",
     "n_i_area","n_g_area","n_s_area","n_s_flag",
     "b_i","e_i","t_i","v_i","f_i",
     "area_i","has_tf","area_g",
-    "A_is","A_gs","A_flag_is","spdes","flag_spde",
-    "matern_range_flag","matern_sigma_flag",
+    "A_is","A_gs","spdes",
     "has_smooths_catch","Xs_catch","Zs_catch",
     "has_smooths_pop","Xs_pop_i","Zs_pop_i","Xs_pop_g","Zs_pop_g"
   )
+  if (use_flag_spatial) {
+    req <- c(req, "A_flag_is", "flag_spde", "matern_range_flag", "matern_sigma_flag")
+  }
   miss <- setdiff(req, names(data_tmb))
   if (length(miss)) {
     stop(
@@ -139,9 +143,6 @@
   if (!is.list(data_tmb$spdes) || length(data_tmb$spdes) != data_tmb$n_a) {
     stop("`spdes` must be a list with one anisotropic SPDE object per area.", call. = FALSE)
   }
-  if (!is.list(data_tmb$flag_spde) || length(data_tmb$flag_spde) != 1L) {
-    stop("`flag_spde` must be a one-element list containing the dedicated flag SPDE object.", call. = FALSE)
-  }
   if (!identical(nrow(data_tmb$has_tf), data_tmb$n_t)) {
     stop("`has_tf` must have `n_t` rows.", call. = FALSE)
   }
@@ -159,17 +160,11 @@
   if (!inherits(data_tmb$A_gs, "sparseMatrix")) {
     stop("`A_gs` must be a sparse matrix.", call. = FALSE)
   }
-  if (!inherits(data_tmb$A_flag_is, "sparseMatrix")) {
-    stop("`A_flag_is` must be a sparse matrix.", call. = FALSE)
-  }
   if (!identical(nrow(data_tmb$A_is), data_tmb$n_i) || !identical(ncol(data_tmb$A_is), n_s_total)) {
     stop("`A_is` must have dimension `n_i x sum(n_s_area)`.", call. = FALSE)
   }
   if (!identical(nrow(data_tmb$A_gs), data_tmb$n_g) || !identical(ncol(data_tmb$A_gs), n_s_total)) {
     stop("`A_gs` must have dimension `n_g x sum(n_s_area)`.", call. = FALSE)
-  }
-  if (!identical(nrow(data_tmb$A_flag_is), data_tmb$n_i) || !identical(ncol(data_tmb$A_flag_is), data_tmb$n_s_flag)) {
-    stop("`A_flag_is` must have dimension `n_i x n_s_flag`.", call. = FALSE)
   }
   if (!is.matrix(data_tmb$Ais_ij) || ncol(data_tmb$Ais_ij) != 2L) {
     stop("`Ais_ij` must be a two-column matrix of sparse indices.", call. = FALSE)
@@ -199,6 +194,36 @@
 
   if (data_tmb$n_f > 1L && !all(data_tmb$has_tf %in% c(0L, 1L))) {
     stop("`has_tf` must contain only 0/1 entries.", call. = FALSE)
+  }
+
+  if (use_flag_spatial) {
+    if (!is.list(data_tmb$flag_spde) || length(data_tmb$flag_spde) != 1L) {
+      stop("`flag_spde` must be a one-element list containing the dedicated flag SPDE object.", call. = FALSE)
+    }
+    if (!inherits(data_tmb$A_flag_is, "sparseMatrix")) {
+      stop("`A_flag_is` must be a sparse matrix.", call. = FALSE)
+    }
+    if (!identical(nrow(data_tmb$A_flag_is), data_tmb$n_i) || !identical(ncol(data_tmb$A_flag_is), data_tmb$n_s_flag)) {
+      stop("`A_flag_is` must have dimension `n_i x n_s_flag`.", call. = FALSE)
+    }
+    if (length(data_tmb$matern_range_flag) != 1L || length(data_tmb$matern_sigma_flag) != 1L) {
+      stop("`matern_range_flag` and `matern_sigma_flag` must be scalars when `q_diffs_spatial` is on.", call. = FALSE)
+    }
+  } else {
+    if (!identical(as.integer(data_tmb$n_s_flag), 0L)) {
+      stop("`n_s_flag` must be 0 when `q_diffs_spatial` is off.", call. = FALSE)
+    }
+    if ("A_flag_is" %in% names(data_tmb)) {
+      if (!inherits(data_tmb$A_flag_is, "sparseMatrix")) {
+        stop("`A_flag_is` must be a sparse matrix.", call. = FALSE)
+      }
+      if (!identical(nrow(data_tmb$A_flag_is), data_tmb$n_i) || !identical(ncol(data_tmb$A_flag_is), 0L)) {
+        stop("`A_flag_is` must have dimension `n_i x 0` when `q_diffs_spatial` is off.", call. = FALSE)
+      }
+    }
+    if ("flag_spde" %in% names(data_tmb) && length(data_tmb$flag_spde) != 0L) {
+      stop("`flag_spde` must be empty when `q_diffs_spatial` is off.", call. = FALSE)
+    }
   }
 
   if (!identical(nrow(data_tmb$Xs_catch), data_tmb$n_i))

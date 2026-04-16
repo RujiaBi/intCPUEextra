@@ -402,6 +402,9 @@
 #' @param flag_mesh Optional dedicated mesh for the shared flag-specific
 #'   spatial field (`flag_s`). When fitting multiple areas and enabling
 #'   `q_diffs_spatial`, supply a single full-domain mesh here.
+#' @param q_diffs_spatial `"on"` or `"off"`. When `"off"`, `make_data()`
+#'   skips construction of the dedicated `flag_s` mesh/SPDE objects and
+#'   returns lightweight placeholders instead.
 #'
 #' @return A list with elements mesh, data, key, scales, smooth_basis, smooth_info.
 #' @author Rujia Bi \email{rbi@@iattc.org}
@@ -415,13 +418,15 @@ make_data <- function(
     projection_data = NULL,
     area_scale = "auto",
     area_col = NULL,
-    flag_mesh = NULL
+    flag_mesh = NULL,
+    q_diffs_spatial = c("on", "off")
 ) {
+  q_diffs_spatial <- match.arg(q_diffs_spatial)
   formulas <- .resolve_intCPUE_formulas(
     formula = formula,
     formula_catchability = formula_catchability,
     formula_population = formula_population,
-    caller = "make_data"
+	    caller = "make_data"
   )
   formula_catchability <- formulas$formula_catchability
   formula_population <- formulas$formula_population
@@ -448,10 +453,11 @@ make_data <- function(
   v_chk <- .check_0based_contiguous(data_utm$vesid, "vesid")
   f_chk <- .check_0based_contiguous(data_utm$flagid, "flagid")
 
-  n_t <- t_chk$n
-  n_v <- v_chk$n
-  n_f <- f_chk$n
-  tid_values <- seq.int(0L, n_t - 1L)
+	  n_t <- t_chk$n
+	  n_v <- v_chk$n
+	  n_f <- f_chk$n
+  use_flag_spatial <- identical(q_diffs_spatial, "on") && n_f > 1L
+	  tid_values <- seq.int(0L, n_t - 1L)
 
   area_values <- .area_levels_from_data(data_utm, area_col = area_col)
   area_levels <- unique(area_values)
@@ -504,18 +510,30 @@ make_data <- function(
     n_i <- nrow(data_utm_single)
     n_g <- nrow(key)
 
-    flag_mesh_obj <- if (is.null(flag_mesh)) {
-      mesh_obj
+    if (use_flag_spatial) {
+      flag_mesh_obj <- if (is.null(flag_mesh)) {
+        mesh_obj
+      } else {
+        .as_intCPUEmesh(
+          mesh = flag_mesh,
+          loc_xy = loc_xy,
+          xy_cols = c("utm_x_scale", "utm_y_scale"),
+          recompute_A = "auto"
+        )
+      }
+      flag_spde_aniso <- .prep_anisotropy(mesh = flag_mesh_obj$mesh, spde = flag_mesh_obj$spde)
+      A_flag_is <- flag_mesh_obj$A
+      n_s_flag <- as.integer(flag_spde_aniso$n_s)
+      matern_range_flag <- as.numeric(diff(range(flag_mesh_obj$mesh$loc[, 1])) / 5)
+      matern_sigma_flag <- 1.0
+      flag_spde <- list(flag_spde_aniso)
     } else {
-      .as_intCPUEmesh(
-        mesh = flag_mesh,
-        loc_xy = loc_xy,
-        xy_cols = c("utm_x_scale", "utm_y_scale"),
-        recompute_A = "auto"
-      )
+      A_flag_is <- Matrix::Matrix(0, nrow = n_i, ncol = 0L, sparse = TRUE)
+      n_s_flag <- 0L
+      matern_range_flag <- numeric(0)
+      matern_sigma_flag <- numeric(0)
+      flag_spde <- list()
     }
-    flag_spde_aniso <- .prep_anisotropy(mesh = flag_mesh_obj$mesh, spde = flag_mesh_obj$spde)
-    A_flag_is <- flag_mesh_obj$A
 
     sm_catch <- .normalize_smoother_output(
       parse_smoothers(
@@ -628,13 +646,13 @@ make_data <- function(
       Ais_ij = Ais_ij,
       Ais_x = Ais_x,
 
-      n_s_flag = as.integer(flag_spde_aniso$n_s),
+      n_s_flag = n_s_flag,
       matern_range = as.numeric(diff(range(mesh$loc[, 1])) / 5),
-      matern_range_flag = as.numeric(diff(range(flag_mesh_obj$mesh$loc[, 1])) / 5),
+      matern_range_flag = matern_range_flag,
       range_prob = 0.5,
       matern_sigma_0 = rep(1, 1L),
       matern_sigma_t = rep(1, 1L),
-      matern_sigma_flag = 1.0,
+      matern_sigma_flag = matern_sigma_flag,
       sigma_prob = 0.05,
 
       has_smooths_catch = as.integer(isTRUE(sm_catch$has_smooths)),
@@ -650,7 +668,7 @@ make_data <- function(
       b_smooth_start_pop = as.integer(sm_pop_obs$b_smooth_start),
 
       spdes = list(spde_aniso),
-      flag_spde = list(flag_spde_aniso)
+      flag_spde = flag_spde
     )
 
     return(list(
@@ -786,23 +804,36 @@ make_data <- function(
     }
   }
 
-  loc_xy_all <- as.matrix(data_stack[, c("utm_x_scale", "utm_y_scale"), drop = FALSE])
-  if (is.null(flag_mesh)) {
-    flag_mesh_obj <- .as_intCPUEmesh(
-      mesh = mesh_list[[1L]],
-      loc_xy = loc_xy_all,
-      xy_cols = c("utm_x_scale", "utm_y_scale"),
-      recompute_A = "always"
-    )
+  if (use_flag_spatial) {
+    loc_xy_all <- as.matrix(data_stack[, c("utm_x_scale", "utm_y_scale"), drop = FALSE])
+    if (is.null(flag_mesh)) {
+      flag_mesh_obj <- .as_intCPUEmesh(
+        mesh = mesh_list[[1L]],
+        loc_xy = loc_xy_all,
+        xy_cols = c("utm_x_scale", "utm_y_scale"),
+        recompute_A = "always"
+      )
+    } else {
+      flag_mesh_obj <- .as_intCPUEmesh(
+        mesh = flag_mesh,
+        loc_xy = loc_xy_all,
+        xy_cols = c("utm_x_scale", "utm_y_scale"),
+        recompute_A = "auto"
+      )
+    }
+    flag_spde_aniso <- .prep_anisotropy(mesh = flag_mesh_obj$mesh, spde = flag_mesh_obj$spde)
+    A_flag_is <- flag_mesh_obj$A
+    n_s_flag <- as.integer(flag_spde_aniso$n_s)
+    matern_range_flag <- as.numeric(diff(range(flag_mesh_obj$mesh$loc[, 1])) / 5)
+    matern_sigma_flag <- 1.0
+    flag_spde <- list(flag_spde_aniso)
   } else {
-    flag_mesh_obj <- .as_intCPUEmesh(
-      mesh = flag_mesh,
-      loc_xy = loc_xy_all,
-      xy_cols = c("utm_x_scale", "utm_y_scale"),
-      recompute_A = "auto"
-    )
+    A_flag_is <- Matrix::Matrix(0, nrow = n_i, ncol = 0L, sparse = TRUE)
+    n_s_flag <- 0L
+    matern_range_flag <- numeric(0)
+    matern_sigma_flag <- numeric(0)
+    flag_spde <- list()
   }
-  flag_spde_aniso <- .prep_anisotropy(mesh = flag_mesh_obj$mesh, spde = flag_mesh_obj$spde)
 
   data <- list(
     n_a = n_a,
@@ -814,7 +845,7 @@ make_data <- function(
     n_i_area = as.integer(n_i_area),
     n_g_area = as.integer(n_g_area),
     n_s_area = as.integer(n_s_area),
-    n_s_flag = as.integer(flag_spde_aniso$n_s),
+    n_s_flag = n_s_flag,
 
     b_i = data_stack$cpue,
     e_i = as.integer(data_stack$encounter),
@@ -828,16 +859,16 @@ make_data <- function(
 
     A_is = A_is,
     A_gs = A_gs,
-    A_flag_is = flag_mesh_obj$A,
+    A_flag_is = A_flag_is,
     Ais_ij = Ais_ij,
     Ais_x = Ais_x,
 
     matern_range = matern_range,
-    matern_range_flag = as.numeric(diff(range(flag_mesh_obj$mesh$loc[, 1])) / 5),
+    matern_range_flag = matern_range_flag,
     range_prob = 0.5,
     matern_sigma_0 = rep(1, n_a),
     matern_sigma_t = rep(1, n_a),
-    matern_sigma_flag = 1.0,
+    matern_sigma_flag = matern_sigma_flag,
     sigma_prob = 0.05,
 
     has_smooths_catch = as.integer(isTRUE(sm_catch$has_smooths)),
@@ -853,7 +884,7 @@ make_data <- function(
     b_smooth_start_pop = integer(0),
 
     spdes = spde_list,
-    flag_spde = list(flag_spde_aniso)
+    flag_spde = flag_spde
   )
 
   list(
