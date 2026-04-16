@@ -14,16 +14,16 @@
                                          q_diffs_spatial = c("on", "off")) {
   template_id <- .template_id_intCPUE(q_diffs_time, q_diffs_spatial)
 
-  dll_dir <- system.file("tmb", package = "intCPUE")
+  dll_dir <- system.file("tmb", package = "intCPUEextra")
   if (!nzchar(dll_dir)) {
-    stop("Could not locate installed intCPUE template DLLs in inst/tmb.", call. = FALSE)
+    stop("Could not locate installed intCPUEextra template DLLs in inst/tmb.", call. = FALSE)
   }
 
   dll_path <- TMB::dynlib(file.path(dll_dir, template_id))
   if (!file.exists(dll_path)) {
     stop(
       "Missing precompiled template DLL for ", template_id,
-      ". Reinstall intCPUE so installation can build the template set.",
+      ". Reinstall intCPUEextra so installation can build the template set.",
       call. = FALSE
     )
   }

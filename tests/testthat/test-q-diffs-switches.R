@@ -56,9 +56,10 @@ test_that("flags with fewer than two time points are excluded from flag_t constr
     byrow = TRUE
   )
 
-  constraint <- intCPUE:::.build_flag_t_constraint(has_tf)
+  constraint <- intCPUEextra:::.build_flag_t_constraint(has_tf)
 
   expect_equal(constraint$estimable_flag, c(FALSE, TRUE))
+  expect_true(constraint$any_estimable)
   expect_equal(constraint$n_free, 1L)
   expect_equal(
     constraint$flag_t_index,
@@ -75,12 +76,52 @@ test_that("flags with fewer than two time points are excluded from flag_t constr
   )
 })
 
+test_that("multi-area q_diffs_spatial requires a dedicated flag mesh", {
+  skip_if_not_installed("sf")
+  skip_if_not_installed("fmesher")
+
+  data_input <- data.frame(
+    cpue = c(1.2, 0.0, 0.8, 1.1, 0.9, 0.0, 1.3, 0.7),
+    encounter = c(1L, 0L, 1L, 1L, 1L, 0L, 1L, 1L),
+    lon = c(150.0, 150.1, 150.2, 150.3, 151.0, 151.1, 151.2, 151.3),
+    lat = c(40.0, 40.0, 40.1, 40.1, 39.8, 39.8, 39.9, 39.9),
+    vesid = rep(0:1, 4),
+    tid = rep(0:1, each = 4),
+    flagid = rep(c(0L, 1L), 4),
+    area = rep(c("west", "east"), each = 4)
+  )
+
+  utm <- make_utm(data_input, utm_zone = NULL, coord_scale = "auto")
+  data_utm <- utm$data_utm
+  mesh_list <- lapply(split(data_utm, data_utm$area), function(dd) {
+    make_mesh(
+      dd,
+      xy_cols = c("utm_x_scale", "utm_y_scale"),
+      type = "cutoff",
+      cutoff = 0.2
+    )
+  })
+
+  expect_error(
+    intCPUE(
+      data_utm = data_utm,
+      mesh = mesh_list,
+      area_col = "area",
+      q_diffs_spatial = "on",
+      q_diffs_time = "off"
+    ),
+    "require `flag_mesh`"
+  )
+})
+
 test_that("observation-SD mapping is honored", {
-  parameters <- intCPUE:::.make_parameters_intCPUE(
+  parameters <- intCPUEextra:::.make_parameters_intCPUE(
+    n_a = 1L,
     n_t = 3L,
     n_v = 1L,
     n_f = 2L,
     n_s = 4L,
+    n_s_flag = 4L,
     K_smooth_catch = 0L,
     n_smooth_catch = 0L,
     sum_k_catch = 0L,
@@ -89,9 +130,10 @@ test_that("observation-SD mapping is honored", {
     sum_k_pop = 0L
   )
 
-  map <- intCPUE:::.make_map_intCPUE(
+  map <- intCPUEextra:::.make_map_intCPUE(
     parameters = parameters,
     n_f = 2L,
+    pop_spatiotemporal_type = "rw",
     q_diffs_time = "off",
     obs_sd = "flag"
   )
@@ -99,15 +141,53 @@ test_that("observation-SD mapping is honored", {
   expect_true(is.na(map$ln_sd))
   expect_null(map$ln_sd_flag)
 
-  shared_map <- intCPUE:::.make_map_intCPUE(
+  shared_map <- intCPUEextra:::.make_map_intCPUE(
     parameters = parameters,
     n_f = 2L,
+    pop_spatiotemporal_type = "rw",
     q_diffs_time = "off",
     obs_sd = "shared"
   )
 
   expect_true(all(is.na(shared_map$ln_sd_flag)))
   expect_null(shared_map[["ln_sd", exact = TRUE]])
+})
+
+test_that("RW/AR1 spatiotemporal type maps rho parameters appropriately", {
+  parameters <- intCPUEextra:::.make_parameters_intCPUE(
+    n_a = 2L,
+    n_t = 3L,
+    n_v = 1L,
+    n_f = 2L,
+    n_s = 4L,
+    n_s_flag = 4L,
+    K_smooth_catch = 0L,
+    n_smooth_catch = 0L,
+    sum_k_catch = 0L,
+    K_smooth_pop = 0L,
+    n_smooth_pop = 0L,
+    sum_k_pop = 0L
+  )
+
+  rw_map <- intCPUEextra:::.make_map_intCPUE(
+    parameters = parameters,
+    n_f = 2L,
+    pop_spatiotemporal_type = "rw",
+    q_diffs_time = "off",
+    obs_sd = "shared"
+  )
+  expect_true(all(is.na(rw_map$transf_rho_1)))
+  expect_true(all(is.na(rw_map$transf_rho_2)))
+
+  ar1_map <- intCPUEextra:::.make_map_intCPUE(
+    parameters = parameters,
+    n_f = 2L,
+    pop_spatiotemporal_type = "ar1",
+    q_diffs_time = "off",
+    obs_sd = "shared"
+  )
+  expect_null(ar1_map[["transf_rho_1", exact = TRUE]])
+  expect_null(ar1_map[["transf_rho_2", exact = TRUE]])
 })
 
 test_that("observation-SD and AR1 spatiotemporal settings are reported by TMB", {
@@ -149,6 +229,7 @@ test_that("observation-SD and AR1 spatiotemporal settings are reported by TMB", 
   )
 
   rep_flag_sd <- fit_flag_sd$obj$report()
+  expect_equal(fit_flag_sd$settings$pop_spatiotemporal_type, "rw")
   expect_equal(as.integer(rep_flag_sd$use_pop_spatiotemporal_rw), 1L)
   expect_equal(as.integer(rep_flag_sd$use_pop_spatiotemporal_ar1), 0L)
   expect_equal(as.integer(rep_flag_sd$use_flag_sd), 1L)
@@ -169,6 +250,7 @@ test_that("observation-SD and AR1 spatiotemporal settings are reported by TMB", 
   )
 
   rep_ar1 <- fit_ar1$obj$report()
+  expect_equal(fit_ar1$settings$pop_spatiotemporal_type, "ar1")
   expect_equal(as.integer(rep_ar1$use_pop_spatiotemporal_rw), 0L)
   expect_equal(as.integer(rep_ar1$use_pop_spatiotemporal_ar1), 1L)
   expect_equal(as.integer(rep_ar1$use_flag_sd), 0L)

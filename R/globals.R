@@ -1,4 +1,5 @@
 utils::globalVariables(c(
+  "areaid",
   "axis_type",
   "component",
   "observed",

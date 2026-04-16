@@ -11,7 +11,9 @@ make_data(
   formula_catchability = NULL,
   formula_population = NULL,
   projection_data = NULL,
-  area_scale = "auto"
+  area_scale = "auto",
+  area_col = NULL,
+  flag_mesh = NULL
 )
 }
 \arguments{
@@ -45,6 +47,17 @@ one row per grid cell-time combination and repeat the static covariate
 values across \code{tid}.}
 
 \item{area_scale}{Numeric or "auto". Scaling factor for area_km2.}
+
+\item{area_col}{Optional area column in \code{data_utm}. If supplied and it
+identifies multiple areas, \code{mesh} must be a named list with one mesh per
+area. Multiple areas share vessel effects and non-spatial flag effects,
+while temporal/spatial population components remain area-specific.
+Population smooths and custom \code{projection_data} are currently unsupported
+in multi-area mode.}
+
+\item{flag_mesh}{Optional dedicated mesh for the shared flag-specific
+spatial field (\code{flag_s}). When fitting multiple areas and enabling
+\code{q_diffs_spatial}, supply a single full-domain mesh here.}
 }
 \value{
 A list with elements mesh, data, key, scales, smooth_basis, smooth_info.

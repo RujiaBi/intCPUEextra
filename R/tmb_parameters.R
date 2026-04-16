@@ -30,10 +30,12 @@
 #' @return Named list of initial parameter values for TMB::MakeADFun().
 #' @keywords internal
 .make_parameters_intCPUE <- function(
+    n_a,
     n_t,
     n_v,
     n_f,
     n_s,
+    n_s_flag = n_s,
     n_flag_t_free = 0L,
     use_q_diffs_time = TRUE,
     use_q_diffs_spatial = TRUE,
@@ -72,30 +74,30 @@
     # ==========================================================
     # Residual SD (often used for positive-component likelihood or observation noise).
     # Stored on log scale in C++ for positivity.
-    ln_sd = 0.0,
-    ln_sd_flag = rep(0.0, n_f),
+    ln_sd = rep(0.0, n_a),
+    ln_sd_flag = empty_mat(n_f, n_a),
     
     # ==========================================================
     # Anisotropy parameters
     # ==========================================================
     # ln_H_input typically parameterizes an anisotropy transform H (2 params).
-    ln_H_input = c(0.0, 0.0),
+    ln_H_input = empty_mat(n_a, 2L),
     
     # ==========================================================
     # SPDE hyperparameters (two components, e.g. encounter vs positive)
     # ==========================================================
     # Range parameters (log scale). Often shared across spatial + spatiotemporal fields
     # within a component; the C++ defines how they enter Q.
-    ln_range_1 = 0.0,
+    ln_range_1 = rep(0.0, n_a),
     # Marginal SDs on log scale:
-    ln_sigma_0_1    = 0.0,   # spatial (omega) SD
-    ln_sigma_t_1    = 0.0,   # spatiotemporal (epsilon) SD
-    transf_rho_1    = 0.0,   # spatiotemporal AR1 correlation (working scale)
+    ln_sigma_0_1    = rep(0.0, n_a),   # spatial (omega) SD
+    ln_sigma_t_1    = rep(0.0, n_a),   # spatiotemporal (epsilon) SD
+    transf_rho_1    = rep(0.0, n_a),   # spatiotemporal AR1 correlation (working scale)
     
-    ln_range_2 = 0.0,
-    ln_sigma_0_2    = 0.0,
-    ln_sigma_t_2    = 0.0,
-    transf_rho_2    = 0.0,
+    ln_range_2 = rep(0.0, n_a),
+    ln_sigma_0_2    = rep(0.0, n_a),
+    ln_sigma_t_2    = rep(0.0, n_a),
+    transf_rho_2    = rep(0.0, n_a),
     
     # ==========================================================
     # Vessel random effects (two components)
@@ -113,8 +115,8 @@
     # ==========================================================
     # yq_t_* are time-varying effects common to all flags.
     # NOTE: name suggests "year-quarter"; ensure semantics match data.
-    yq_t_1 = rep(0.0, n_t),
-    yq_t_2 = rep(0.0, n_t),
+    yq_t_1 = empty_mat(n_t, n_a),
+    yq_t_2 = empty_mat(n_t, n_a),
     
     # ==========================================================
     # Spatial + spatiotemporal random fields (SPDE vertices)
@@ -131,12 +133,11 @@
     # ==========================================================
     # Flag systematic differences (relative to baseline flag = 0)
     # ==========================================================
-    # flag_f_* : one coefficient per non-baseline flag (length n_f-1).
-    # If n_f == 1, store as length-0 numeric to keep shapes consistent.
-    flag_f_1 = if (n_f > 1L) rep(0.0, n_f - 1L) else numeric(0),
-    flag_f_2 = if (n_f > 1L) rep(0.0, n_f - 1L) else numeric(0),
+    # flag_f_* : one shared coefficient per non-baseline flag.
+    flag_f_1 = zero_or_vec(n_f > 1L, max(0L, n_f - 1L)),
+    flag_f_2 = zero_or_vec(n_f > 1L, max(0L, n_f - 1L)),
     
-    # Log SD for flag systematic differences (if modeled as random effects).
+    # Log SD for shared flag systematic differences.
     flag_ln_std_dev_1 = 0.0,
     flag_ln_std_dev_2 = 0.0,
     
@@ -144,11 +145,13 @@
     # Flag temporal differences (relative to baseline flag = 0)
     # ==========================================================
     # flag_t_* : free coefficients only for observed, non-reference flag-time cells.
-    # Missing cells and the first observed time per flag are reconstructed in C++ as 0.
+    # Missing cells and the first observed time for each area x flag combination
+    # are omitted from the free vector and reconstructed in C++ as 0.
     flag_t_1 = zero_or_vec(use_q_diffs_time, n_flag_t_free),
     flag_t_2 = zero_or_vec(use_q_diffs_time, n_flag_t_free),
     
-    # Log SD for flag temporal differences (per component).
+    # Log SD hyperparameters for shared flag temporal random effects.
+    # These are fixed-effect hyperparameters, not random-effect states.
     # If no flags are estimable, fit() may map these to NA to fix variance at 0.
     flag_t_ln_std_dev_1 = 0.0,
     flag_t_ln_std_dev_2 = 0.0,
@@ -156,14 +159,16 @@
     # ==========================================================
     # Flag spatial differences (relative to baseline flag = 0)
     # ==========================================================
-    # flag_s_* : (n_s x (n_f-1)) matrix. Each column is a flag-specific spatial field.
-    # SD handled via ln_sigma_flag_* above (component-specific).
-    flag_s_1 = zero_or_mat(use_q_diffs_spatial, n_s, max(0L, n_f - 1L)),
-    flag_s_2 = zero_or_mat(use_q_diffs_spatial, n_s, max(0L, n_f - 1L)),
+    # flag_s_* : (n_s_flag x (n_f-1)) matrix on the dedicated flag mesh.
+    flag_s_1 = zero_or_mat(use_q_diffs_spatial, n_s_flag, max(0L, n_f - 1L)),
+    flag_s_2 = zero_or_mat(use_q_diffs_spatial, n_s_flag, max(0L, n_f - 1L)),
     
-    # flag spatial-diff field SD
-    ln_sigma_flag_1 = 0.0,  
-    ln_sigma_flag_2 = 0.0,
+    # Dedicated anisotropy, range, and SD hyperparameters for the shared flag spatial field.
+    ln_H_flag_input = if (isTRUE(use_q_diffs_spatial)) empty_mat(1L, 2L) else matrix(0.0, nrow = 0L, ncol = 0L),
+    ln_range_flag_1 = if (isTRUE(use_q_diffs_spatial)) 0.0 else numeric(0),
+    ln_range_flag_2 = if (isTRUE(use_q_diffs_spatial)) 0.0 else numeric(0),
+    ln_sigma_flag_1 = if (isTRUE(use_q_diffs_spatial)) 0.0 else numeric(0),
+    ln_sigma_flag_2 = if (isTRUE(use_q_diffs_spatial)) 0.0 else numeric(0),
     
     # ==========================================================
     # Catchability smooth terms (mgcv::s())

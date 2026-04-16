@@ -218,6 +218,93 @@
   out
 }
 
+.area_levels_from_data <- function(data_utm, area_col = NULL) {
+  if (is.null(area_col)) {
+    return(rep(".all", nrow(data_utm)))
+  }
+  if (!area_col %in% names(data_utm)) {
+    stop("`data_utm` must contain `", area_col, "` for multi-area fitting.", call. = FALSE)
+  }
+  area_vals <- as.character(data_utm[[area_col]])
+  if (anyNA(area_vals) || any(!nzchar(area_vals))) {
+    stop("`", area_col, "` must not contain NA/empty values.", call. = FALSE)
+  }
+  area_vals
+}
+
+.mesh_list_from_input <- function(mesh, area_levels) {
+  is_mesh_list <- is.list(mesh) &&
+    !inherits(mesh, "intCPUEmesh") &&
+    !is.null(names(mesh)) &&
+    any(nzchar(names(mesh)))
+
+  if (length(area_levels) == 1L && !is_mesh_list) {
+    if (length(area_levels) != 1L) {
+      stop(
+        "For multi-area fitting, `mesh` must be a named list with one mesh per area.",
+        call. = FALSE
+      )
+    }
+    return(list(mesh))
+  }
+
+  if (!is_mesh_list) {
+    stop(
+      "For multi-area fitting, `mesh` must be a named list with one mesh per area.",
+      call. = FALSE
+    )
+  }
+
+  if (is.null(names(mesh)) || anyNA(names(mesh)) || any(!nzchar(names(mesh)))) {
+    stop("`mesh` must be a named list with names matching the area levels.", call. = FALSE)
+  }
+
+  miss <- setdiff(area_levels, names(mesh))
+  if (length(miss)) {
+    stop("`mesh` is missing entries for area(s): ", paste(miss, collapse = ", "), call. = FALSE)
+  }
+
+  mesh[area_levels]
+}
+
+.blockdiag_dense_list <- function(mats, n_rows) {
+  mats <- mats[!vapply(mats, is.null, logical(1))]
+  if (!length(mats)) {
+    return(matrix(0, nrow = n_rows, ncol = 0L))
+  }
+  if (sum(vapply(mats, ncol, integer(1))) == 0L) {
+    return(matrix(0, nrow = n_rows, ncol = 0L))
+  }
+  mats_sparse <- lapply(mats, function(m) Matrix::Matrix(m, sparse = TRUE))
+  as.matrix(Matrix::bdiag(mats_sparse))
+}
+
+.embed_sparse_rows <- function(Z, rows, n_all) {
+  if (!inherits(Z, "sparseMatrix")) {
+    Z <- Matrix::Matrix(Z, sparse = TRUE)
+  }
+  if (nrow(Z) != length(rows)) {
+    stop("Smooth random-effect matrix row count does not match area rows.", call. = FALSE)
+  }
+  out <- Matrix::Matrix(0, nrow = n_all, ncol = ncol(Z), sparse = TRUE)
+  out[rows, ] <- Z
+  out
+}
+
+.combine_sparse_list_by_rows <- function(z_by_area, row_index_by_area, n_rows_total) {
+  out <- list()
+  idx <- 0L
+  for (a in seq_along(z_by_area)) {
+    z_list <- z_by_area[[a]]
+    if (!length(z_list)) next
+    for (k in seq_along(z_list)) {
+      idx <- idx + 1L
+      out[[idx]] <- .embed_sparse_rows(z_list[[k]], row_index_by_area[[a]], n_rows_total)
+    }
+  }
+  out
+}
+
 .default_population_projection_data <- function(data_utm, key, basis_out, tid_values) {
   needed_vars <- .smooth_vars_from_basis(basis_out)
   coord_cols <- c("utm_x_scale", "utm_y_scale")
@@ -306,6 +393,15 @@
 #'   one row per grid cell-time combination and repeat the static covariate
 #'   values across `tid`.
 #' @param area_scale Numeric or "auto". Scaling factor for area_km2.
+#' @param area_col Optional area column in `data_utm`. If supplied and it
+#'   identifies multiple areas, `mesh` must be a named list with one mesh per
+#'   area. Multiple areas share vessel effects and non-spatial flag effects,
+#'   while temporal/spatial population components remain area-specific.
+#'   Population smooths and custom `projection_data` are currently unsupported
+#'   in multi-area mode.
+#' @param flag_mesh Optional dedicated mesh for the shared flag-specific
+#'   spatial field (`flag_s`). When fitting multiple areas and enabling
+#'   `q_diffs_spatial`, supply a single full-domain mesh here.
 #'
 #' @return A list with elements mesh, data, key, scales, smooth_basis, smooth_info.
 #' @author Rujia Bi \email{rbi@@iattc.org}
@@ -317,7 +413,9 @@ make_data <- function(
     formula_catchability = NULL,
     formula_population = NULL,
     projection_data = NULL,
-    area_scale = "auto"
+    area_scale = "auto",
+    area_col = NULL,
+    flag_mesh = NULL
 ) {
   formulas <- .resolve_intCPUE_formulas(
     formula = formula,
@@ -330,7 +428,11 @@ make_data <- function(
 
   data_utm <- as.data.frame(data_utm)
 
-  .check_required_cols(data_utm, c("cpue", "encounter", "lon", "lat", "vesid", "tid", "flagid", "utm_x_scale", "utm_y_scale"))
+  req_cols <- c("cpue", "encounter", "lon", "lat", "vesid", "tid", "flagid", "utm_x_scale", "utm_y_scale")
+  if (!is.null(area_col)) {
+    req_cols <- c(req_cols, area_col)
+  }
+  .check_required_cols(data_utm, req_cols)
   .check_numeric(data_utm, c("cpue", "encounter", "lon", "lat", "vesid", "tid", "flagid", "utm_x_scale", "utm_y_scale"))
 
   if (anyNA(data_utm$lon) || anyNA(data_utm$lat)) {
@@ -341,213 +443,446 @@ make_data <- function(
     stop("`utm_x_scale`/`utm_y_scale` must not contain NA.", call. = FALSE)
   }
 
-  # ---- SPDE + A matrix (handle intCPUEmesh or bare mesh) ----
-  loc_xy <- as.matrix(data_utm[, c("utm_x_scale", "utm_y_scale"), drop = FALSE])
-
-  mesh_in <- mesh
-  mesh_obj <- .as_intCPUEmesh(
-    mesh = mesh_in,
-    loc_xy = loc_xy,
-    xy_cols = c("utm_x_scale", "utm_y_scale"),
-    recompute_A = "auto"
-  )
-
-  if (!is.null(mesh_obj$loc_xy)) {
-    r1 <- range(mesh_obj$loc_xy[, 1])
-    r2 <- range(loc_xy[, 1])
-    if (is.finite(r1[1]) && is.finite(r2[1])) {
-      if (abs(diff(r1) - diff(r2)) / max(1e-12, diff(r2)) > 0.5) {
-        warning("Mesh coordinate scale may not match `utm_x_scale/utm_y_scale`. Check scaling.", call. = FALSE)
-      }
-    }
-  }
-
-  mesh <- mesh_obj$mesh
-  spde <- mesh_obj$spde
-
-  # ---- A matrices ----
-  A_is <- mesh_obj$A
-  A_isT <- methods::as(A_is, "TsparseMatrix")
-  Ais_ij <- cbind(A_isT@i, A_isT@j)
-  Ais_x <- A_is@x
-
-  # ---- key/extrapolation grid ----
-  key_out <- .prep_key_area(data_utm, mesh, area_scale = area_scale)
-  key <- key_out$key
-  A_gs <- key_out$A_gs
-
-  n_i <- nrow(data_utm)
-  n_g <- nrow(key)
-
   # ---- user-supplied 0-based indices: validate only ----
   t_chk <- .check_0based_contiguous(data_utm$tid, "tid")
   v_chk <- .check_0based_contiguous(data_utm$vesid, "vesid")
   f_chk <- .check_0based_contiguous(data_utm$flagid, "flagid")
-
-  t_i <- t_chk$x
-  v_i <- v_chk$x
-  f_i <- f_chk$x
 
   n_t <- t_chk$n
   n_v <- v_chk$n
   n_f <- f_chk$n
   tid_values <- seq.int(0L, n_t - 1L)
 
-  # ---- smooth parsing: catchability layer ----
+  area_values <- .area_levels_from_data(data_utm, area_col = area_col)
+  area_levels <- unique(area_values)
+  n_a <- length(area_levels)
+  mesh_list <- .mesh_list_from_input(mesh, area_levels = area_levels)
+
+  if (n_a > 1L && (!is.null(formula_population) || !is.null(projection_data))) {
+    stop(
+      "Population smooths and custom `projection_data` are not yet supported in multi-area mode.",
+      call. = FALSE
+    )
+  }
+
+  if (n_a == 1L) {
+    data_utm_single <- data_utm
+    t_i <- t_chk$x
+    v_i <- v_chk$x
+    f_i <- f_chk$x
+
+    loc_xy <- as.matrix(data_utm_single[, c("utm_x_scale", "utm_y_scale"), drop = FALSE])
+    mesh_obj <- .as_intCPUEmesh(
+      mesh = mesh_list[[1L]],
+      loc_xy = loc_xy,
+      xy_cols = c("utm_x_scale", "utm_y_scale"),
+      recompute_A = "auto"
+    )
+
+    if (!is.null(mesh_obj$loc_xy)) {
+      r1 <- range(mesh_obj$loc_xy[, 1])
+      r2 <- range(loc_xy[, 1])
+      if (is.finite(r1[1]) && is.finite(r2[1])) {
+        if (abs(diff(r1) - diff(r2)) / max(1e-12, diff(r2)) > 0.5) {
+          warning("Mesh coordinate scale may not match `utm_x_scale/utm_y_scale`. Check scaling.", call. = FALSE)
+        }
+      }
+    }
+
+    mesh <- mesh_obj$mesh
+    spde <- mesh_obj$spde
+    A_is <- mesh_obj$A
+    A_isT <- methods::as(A_is, "TsparseMatrix")
+    Ais_ij <- cbind(A_isT@i, A_isT@j)
+    Ais_x <- A_isT@x
+
+    key_out <- .prep_key_area(data_utm_single, mesh, area_scale = area_scale)
+    key <- key_out$key
+    if (!is.null(area_col)) key[[area_col]] <- area_levels[1L]
+    A_gs <- key_out$A_gs
+
+    n_i <- nrow(data_utm_single)
+    n_g <- nrow(key)
+
+    flag_mesh_obj <- if (is.null(flag_mesh)) {
+      mesh_obj
+    } else {
+      .as_intCPUEmesh(
+        mesh = flag_mesh,
+        loc_xy = loc_xy,
+        xy_cols = c("utm_x_scale", "utm_y_scale"),
+        recompute_A = "auto"
+      )
+    }
+    flag_spde_aniso <- .prep_anisotropy(mesh = flag_mesh_obj$mesh, spde = flag_mesh_obj$spde)
+    A_flag_is <- flag_mesh_obj$A
+
+    sm_catch <- .normalize_smoother_output(
+      parse_smoothers(
+        formula = formula_catchability,
+        data = data_utm_single,
+        knots = NULL,
+        newdata = NULL,
+        basis_prev = NULL
+      ),
+      n_rows = n_i
+    )
+
+    sm_pop_obs <- .normalize_smoother_output(
+      parse_smoothers(
+        formula = formula_population,
+        data = data_utm_single,
+        knots = NULL,
+        newdata = NULL,
+        basis_prev = NULL
+      ),
+      n_rows = n_i
+    )
+
+    if (isTRUE(sm_pop_obs$has_smooths)) {
+      needed_vars_pop <- .smooth_vars_from_basis(sm_pop_obs$basis_out)
+      projection_data_use <- if (is.null(projection_data)) {
+        .default_population_projection_data(
+          data_utm = data_utm_single,
+          key = key,
+          basis_out = sm_pop_obs$basis_out,
+          tid_values = tid_values
+        )
+      } else {
+        .align_projection_data_to_key(
+          projection_data = projection_data,
+          key = key,
+          needed_vars = needed_vars_pop,
+          tid_values = tid_values
+        )
+      }
+
+      .warn_projection_na(
+        projection_data = projection_data_use,
+        needed_vars = needed_vars_pop
+      )
+
+      sm_pop_proj <- .normalize_smoother_output(
+        parse_smoothers(
+          formula = formula_population,
+          data = data_utm_single,
+          knots = NULL,
+          newdata = projection_data_use,
+          basis_prev = sm_pop_obs$basis_out
+        ),
+        n_rows = n_g * n_t
+      )
+    } else {
+      projection_data_use <- .expand_projection_over_time(
+        key[, c("utm_x_scale", "utm_y_scale"), drop = FALSE],
+        tid_values = tid_values
+      )
+      sm_pop_proj <- .normalize_smoother_output(
+        parse_smoothers(
+          formula = NULL,
+          data = data_utm_single,
+          knots = NULL,
+          newdata = projection_data_use,
+          basis_prev = NULL
+        ),
+        n_rows = n_g * n_t
+      )
+    }
+
+    has_tf <- matrix(FALSE, nrow = n_t, ncol = max(0L, n_f - 1L))
+    if (n_f > 1L) {
+      ii <- which(f_i > 0L)
+      if (length(ii) > 0L) {
+        tt <- t_i[ii] + 1L
+        ff <- f_i[ii]
+        has_tf[cbind(tt, ff)] <- TRUE
+      }
+    }
+
+    spde_aniso <- .prep_anisotropy(mesh = mesh, spde = spde)
+
+    data <- list(
+      n_a = 1L,
+      n_i = n_i,
+      n_t = n_t,
+      n_v = n_v,
+      n_f = n_f,
+      n_g = n_g,
+      n_i_area = as.integer(n_i),
+      n_g_area = as.integer(n_g),
+      n_s_area = as.integer(spde_aniso$n_s),
+
+      b_i = data_utm_single$cpue,
+      e_i = data_utm_single$encounter,
+      t_i = t_i,
+      v_i = v_i,
+      f_i = f_i,
+      area_i = integer(n_i),
+
+      has_tf = has_tf * 1L,
+      area_g = key$area_km2_scaled,
+
+      A_is = A_is,
+      A_gs = A_gs,
+      A_flag_is = A_flag_is,
+      Ais_ij = Ais_ij,
+      Ais_x = Ais_x,
+
+      n_s_flag = as.integer(flag_spde_aniso$n_s),
+      matern_range = as.numeric(diff(range(mesh$loc[, 1])) / 5),
+      matern_range_flag = as.numeric(diff(range(flag_mesh_obj$mesh$loc[, 1])) / 5),
+      range_prob = 0.5,
+      matern_sigma_0 = rep(1, 1L),
+      matern_sigma_t = rep(1, 1L),
+      matern_sigma_flag = 1.0,
+      sigma_prob = 0.05,
+
+      has_smooths_catch = as.integer(isTRUE(sm_catch$has_smooths)),
+      Xs_catch = sm_catch$Xs,
+      Zs_catch = sm_catch$Zs,
+      b_smooth_start_catch = as.integer(sm_catch$b_smooth_start),
+
+      has_smooths_pop = as.integer(isTRUE(sm_pop_obs$has_smooths)),
+      Xs_pop_i = sm_pop_obs$Xs,
+      Zs_pop_i = sm_pop_obs$Zs,
+      Xs_pop_g = sm_pop_proj$Xs,
+      Zs_pop_g = sm_pop_proj$Zs,
+      b_smooth_start_pop = as.integer(sm_pop_obs$b_smooth_start),
+
+      spdes = list(spde_aniso),
+      flag_spde = list(flag_spde_aniso)
+    )
+
+    return(list(
+      data = data,
+      key = key,
+      scales = list(area_scale = key_out$area_scale_val),
+      projection_data = projection_data_use,
+      smooth_basis = list(
+        catchability = sm_catch$basis_out,
+        population = sm_pop_obs$basis_out
+      ),
+      smooth_info = list(
+        catchability = list(
+          labels = sm_catch$labels,
+          classes = sm_catch$classes,
+          sm_dims = sm_catch$sm_dims,
+          b_smooth_start = sm_catch$b_smooth_start,
+          K_smooth = ncol(sm_catch$Xs),
+          n_smooth = length(sm_catch$Zs)
+        ),
+        population = list(
+          labels = sm_pop_obs$labels,
+          classes = sm_pop_obs$classes,
+          sm_dims = sm_pop_obs$sm_dims,
+          b_smooth_start = sm_pop_obs$b_smooth_start,
+          K_smooth = ncol(sm_pop_obs$Xs),
+          n_smooth = length(sm_pop_obs$Zs)
+        )
+      ),
+      area_levels = area_levels
+    ))
+  }
+
+  area_rows <- lapply(area_levels, function(a) which(area_values == a))
+  names(area_rows) <- area_levels
+
+  data_stack <- do.call(
+    rbind,
+    lapply(area_levels, function(a) data_utm[area_rows[[a]], , drop = FALSE])
+  )
+  rownames(data_stack) <- NULL
+
+  row_index_by_area <- vector("list", n_a)
+  names(row_index_by_area) <- area_levels
+  cursor <- 0L
+  for (a in seq_along(area_levels)) {
+    n_here <- length(area_rows[[a]])
+    row_index_by_area[[a]] <- seq.int(cursor + 1L, cursor + n_here)
+    cursor <- cursor + n_here
+  }
+
+  area_data <- vector("list", n_a)
+  names(area_data) <- area_levels
+  key_list <- vector("list", n_a)
+  A_is_list <- vector("list", n_a)
+  A_gs_list <- vector("list", n_a)
+  spde_list <- vector("list", n_a)
+  n_i_area <- integer(n_a)
+  n_g_area <- integer(n_a)
+  n_s_area <- integer(n_a)
+  matern_range <- numeric(n_a)
+
+  for (a in seq_along(area_levels)) {
+    area_nm <- area_levels[a]
+    dd <- data_stack[row_index_by_area[[a]], , drop = FALSE]
+    loc_xy <- as.matrix(dd[, c("utm_x_scale", "utm_y_scale"), drop = FALSE])
+
+    mesh_obj <- .as_intCPUEmesh(
+      mesh = mesh_list[[a]],
+      loc_xy = loc_xy,
+      xy_cols = c("utm_x_scale", "utm_y_scale"),
+      recompute_A = "auto"
+    )
+
+    key_out <- .prep_key_area(dd, mesh_obj$mesh, area_scale = area_scale)
+    key_area <- key_out$key
+    if (!is.null(area_col)) key_area[[area_col]] <- area_nm
+
+    area_data[[a]] <- list(
+      data = dd,
+      mesh = mesh_obj$mesh,
+      spde = .prep_anisotropy(mesh = mesh_obj$mesh, spde = mesh_obj$spde),
+      key = key_area,
+      A_is = mesh_obj$A,
+      A_gs = key_out$A_gs,
+      area_scale_val = key_out$area_scale_val
+    )
+    key_list[[a]] <- key_area
+    A_is_list[[a]] <- mesh_obj$A
+    A_gs_list[[a]] <- key_out$A_gs
+    spde_list[[a]] <- area_data[[a]]$spde
+    n_i_area[a] <- nrow(dd)
+    n_g_area[a] <- nrow(key_area)
+    n_s_area[a] <- area_data[[a]]$spde$n_s
+    matern_range[a] <- diff(range(mesh_obj$mesh$loc[, 1])) / 5
+  }
+
+  n_i <- nrow(data_stack)
+  n_g <- sum(n_g_area)
+  key <- do.call(rbind, key_list)
+  rownames(key) <- NULL
+
+  A_is <- Matrix::bdiag(A_is_list)
+  A_gs <- Matrix::bdiag(A_gs_list)
+  A_isT <- methods::as(A_is, "TsparseMatrix")
+  Ais_ij <- cbind(A_isT@i, A_isT@j)
+  Ais_x <- A_isT@x
+
   sm_catch <- .normalize_smoother_output(
     parse_smoothers(
       formula = formula_catchability,
-      data = data_utm,
+      data = data_stack,
       knots = NULL,
       newdata = NULL,
       basis_prev = NULL
     ),
     n_rows = n_i
   )
+  Xs_catch <- sm_catch$Xs
+  Zs_catch <- sm_catch$Zs
+  sm_dims_catch <- as.integer(sm_catch$sm_dims)
+  b_smooth_start_catch <- as.integer(sm_catch$b_smooth_start)
+  labels_catch <- sm_catch$labels
+  classes_catch <- sm_catch$classes
 
-  # ---- smooth parsing: population layer (obs + projection) ----
-  sm_pop_obs <- .normalize_smoother_output(
-    parse_smoothers(
-      formula = formula_population,
-      data = data_utm,
-      knots = NULL,
-      newdata = NULL,
-      basis_prev = NULL
-    ),
-    n_rows = n_i
-  )
+  area_i <- rep.int(seq.int(0L, n_a - 1L), times = n_i_area)
 
-  if (isTRUE(sm_pop_obs$has_smooths)) {
-    needed_vars_pop <- .smooth_vars_from_basis(sm_pop_obs$basis_out)
-    projection_data_use <- if (is.null(projection_data)) {
-      .default_population_projection_data(
-        data_utm = data_utm,
-        key = key,
-        basis_out = sm_pop_obs$basis_out,
-        tid_values = tid_values
-      )
-    } else {
-      .align_projection_data_to_key(
-        projection_data = projection_data,
-        key = key,
-        needed_vars = needed_vars_pop,
-        tid_values = tid_values
-      )
+  has_tf <- matrix(0L, nrow = n_t, ncol = max(0L, n_f - 1L))
+  if (n_f > 1L) {
+    ii <- which(data_stack$flagid > 0L)
+    if (length(ii)) {
+      has_tf[cbind(data_stack$tid[ii] + 1L, data_stack$flagid[ii])] <- 1L
     }
+  }
 
-    .warn_projection_na(
-      projection_data = projection_data_use,
-      needed_vars = needed_vars_pop
-    )
-
-    sm_pop_proj <- .normalize_smoother_output(
-      parse_smoothers(
-        formula = formula_population,
-        data = data_utm,
-        knots = NULL,
-        newdata = projection_data_use,
-        basis_prev = sm_pop_obs$basis_out
-      ),
-      n_rows = n_g * n_t
+  loc_xy_all <- as.matrix(data_stack[, c("utm_x_scale", "utm_y_scale"), drop = FALSE])
+  if (is.null(flag_mesh)) {
+    flag_mesh_obj <- .as_intCPUEmesh(
+      mesh = mesh_list[[1L]],
+      loc_xy = loc_xy_all,
+      xy_cols = c("utm_x_scale", "utm_y_scale"),
+      recompute_A = "always"
     )
   } else {
-    projection_data_use <- .expand_projection_over_time(
-      key[, c("utm_x_scale", "utm_y_scale"), drop = FALSE],
-      tid_values = tid_values
-    )
-    sm_pop_proj <- .normalize_smoother_output(
-      parse_smoothers(
-        formula = NULL,
-        data = data_utm,
-        knots = NULL,
-        newdata = projection_data_use,
-        basis_prev = NULL
-      ),
-      n_rows = n_g * n_t
+    flag_mesh_obj <- .as_intCPUEmesh(
+      mesh = flag_mesh,
+      loc_xy = loc_xy_all,
+      xy_cols = c("utm_x_scale", "utm_y_scale"),
+      recompute_A = "auto"
     )
   }
-
-  # ---- build has_tf: n_t x (n_f-1), for flag-specific time effects ----
-  has_tf <- matrix(FALSE, nrow = n_t, ncol = max(0L, n_f - 1L))
-  if (n_f > 1L) {
-    ii <- which(f_i > 0L)
-    if (length(ii) > 0L) {
-      tt <- t_i[ii] + 1L
-      ff <- f_i[ii]
-      has_tf[cbind(tt, ff)] <- TRUE
-    }
-  }
+  flag_spde_aniso <- .prep_anisotropy(mesh = flag_mesh_obj$mesh, spde = flag_mesh_obj$spde)
 
   data <- list(
+    n_a = n_a,
     n_i = n_i,
     n_t = n_t,
     n_v = n_v,
     n_f = n_f,
     n_g = n_g,
+    n_i_area = as.integer(n_i_area),
+    n_g_area = as.integer(n_g_area),
+    n_s_area = as.integer(n_s_area),
+    n_s_flag = as.integer(flag_spde_aniso$n_s),
 
-    b_i = data_utm$cpue,
-    e_i = data_utm$encounter,
-    t_i = t_i,
-    v_i = v_i,
-    f_i = f_i,
+    b_i = data_stack$cpue,
+    e_i = as.integer(data_stack$encounter),
+    t_i = as.integer(data_stack$tid),
+    v_i = as.integer(data_stack$vesid),
+    f_i = as.integer(data_stack$flagid),
+    area_i = as.integer(area_i),
 
-    has_tf = has_tf * 1L,
-
+    has_tf = has_tf,
     area_g = key$area_km2_scaled,
 
     A_is = A_is,
     A_gs = A_gs,
+    A_flag_is = flag_mesh_obj$A,
     Ais_ij = Ais_ij,
     Ais_x = Ais_x,
 
-    matern_range = diff(range(mesh$loc[, 1])) / 5,
+    matern_range = matern_range,
+    matern_range_flag = as.numeric(diff(range(flag_mesh_obj$mesh$loc[, 1])) / 5),
     range_prob = 0.5,
-    matern_sigma_0 = 1,
-    matern_sigma_t = 1,
-    matern_sigma_flag = 1,
+    matern_sigma_0 = rep(1, n_a),
+    matern_sigma_t = rep(1, n_a),
+    matern_sigma_flag = 1.0,
     sigma_prob = 0.05,
 
     has_smooths_catch = as.integer(isTRUE(sm_catch$has_smooths)),
-    Xs_catch = sm_catch$Xs,
-    Zs_catch = sm_catch$Zs,
-    b_smooth_start_catch = as.integer(sm_catch$b_smooth_start),
+    Xs_catch = Xs_catch,
+    Zs_catch = Zs_catch,
+    b_smooth_start_catch = as.integer(b_smooth_start_catch),
 
-    has_smooths_pop = as.integer(isTRUE(sm_pop_obs$has_smooths)),
-    Xs_pop_i = sm_pop_obs$Xs,
-    Zs_pop_i = sm_pop_obs$Zs,
-    Xs_pop_g = sm_pop_proj$Xs,
-    Zs_pop_g = sm_pop_proj$Zs,
-    b_smooth_start_pop = as.integer(sm_pop_obs$b_smooth_start)
+    has_smooths_pop = 0L,
+    Xs_pop_i = matrix(0, nrow = n_i, ncol = 0L),
+    Zs_pop_i = list(),
+    Xs_pop_g = matrix(0, nrow = n_g * n_t, ncol = 0L),
+    Zs_pop_g = list(),
+    b_smooth_start_pop = integer(0),
+
+    spdes = spde_list,
+    flag_spde = list(flag_spde_aniso)
   )
-
-  data$spde <- .prep_anisotropy(mesh = mesh, spde = spde)
 
   list(
     data = data,
     key = key,
-    scales = list(area_scale = key_out$area_scale_val),
-    projection_data = projection_data_use,
+    scales = list(area_scale = area_data[[1]]$area_scale_val),
+    projection_data = NULL,
     smooth_basis = list(
       catchability = sm_catch$basis_out,
-      population = sm_pop_obs$basis_out
+      population = list()
     ),
     smooth_info = list(
       catchability = list(
-        labels = sm_catch$labels,
-        classes = sm_catch$classes,
-        sm_dims = sm_catch$sm_dims,
-        b_smooth_start = sm_catch$b_smooth_start,
-        K_smooth = ncol(sm_catch$Xs),
-        n_smooth = length(sm_catch$Zs)
+        labels = labels_catch,
+        classes = classes_catch,
+        sm_dims = sm_dims_catch,
+        b_smooth_start = as.integer(b_smooth_start_catch),
+        K_smooth = ncol(Xs_catch),
+        n_smooth = length(Zs_catch)
       ),
       population = list(
-        labels = sm_pop_obs$labels,
-        classes = sm_pop_obs$classes,
-        sm_dims = sm_pop_obs$sm_dims,
-        b_smooth_start = sm_pop_obs$b_smooth_start,
-        K_smooth = ncol(sm_pop_obs$Xs),
-        n_smooth = length(sm_pop_obs$Zs)
+        labels = character(0),
+        classes = list(),
+        sm_dims = integer(0),
+        b_smooth_start = integer(0),
+        K_smooth = 0L,
+        n_smooth = 0L
       )
-    )
+    ),
+    area_levels = area_levels
   )
 }

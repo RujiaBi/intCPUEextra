@@ -20,8 +20,8 @@ test_that("intCPUE exposes optimizer refinement controls", {
 })
 
 test_that(".safe_optimize can disable all post-nlminb refinement", {
-  pkg_loaded <- "intCPUE" %in% loadedNamespaces()
-  ns <- if (pkg_loaded) asNamespace("intCPUE") else environment(.safe_optimize)
+  pkg_loaded <- "intCPUEextra" %in% loadedNamespaces()
+  ns <- if (pkg_loaded) asNamespace("intCPUEextra") else environment(.safe_optimize)
   nlminb_calls <- 0L
   newton_calls <- 0L
   coord_calls <- 0L
@@ -46,7 +46,7 @@ test_that(".safe_optimize can disable all post-nlminb refinement", {
       .max_grad_opt = mocked_grad,
       .try_newton_refine = mocked_newton,
       .try_coordinate_refine = mocked_coord,
-      .package = "intCPUE",
+      .package = "intCPUEextra",
       .env = ns
     )
   } else {

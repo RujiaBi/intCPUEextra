@@ -9,7 +9,7 @@
 Sys.setenv(TESTTHAT_CPUS = "1")
 
 library(testthat)
-library(intCPUE)
+library(intCPUEextra)
 
 test_path <- if (dir.exists("tests/testthat")) "tests/testthat" else "testthat"
 test_files <- list.files(test_path, pattern = "\\.[Rr]$", full.names = TRUE)

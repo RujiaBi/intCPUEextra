@@ -1,59 +1,58 @@
+---
+output: github_document
+---
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# intCPUE <img src="man/figures/logo.png" align="right" height="136" alt="intCPUE logo" />
 
-> Integrated CPUE standardization with spatiotemporal models in TMB
+
+# intCPUEextra
+
+> A multi-area extension of `intCPUE`
 
 <!-- badges: start -->
-
-[![R-CMD-check](https://github.com/RujiaBi/intCPUE/workflows/R-CMD-check/badge.svg)](https://github.com/RujiaBi/intCPUE/actions)
+[![R-CMD-check](https://github.com/RujiaBi/intCPUEextra/workflows/R-CMD-check/badge.svg)](https://github.com/RujiaBi/intCPUEextra/actions)
 <!-- badges: end -->
 
-**intCPUE** is a TMB-based framework for integrated CPUE standardization
-across multiple fisheries or surveys, with optional preferential
-sampling correction (under development).
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Contact](#contact)
-- [Citation](#citation)
-- [Installation](#installation)
-- [Data structure](#data-structure)
-- [Coordinate projection](#coordinate-projection)
-- [Build spatial mesh](#build-spatial-mesh)
-- [Fit the model](#fit-the-model)
-- [Getting index with bias
-  correction](#getting-index-with-bias-correction)
-- [Next steps](#next-steps)
+**intCPUEextra** extends **intCPUE** to joint multi-area fitting.
+Areas share vessel effects, fishery effects, flag-time effects, and
+catchability smooths. Population time effects and latent population
+structure remain area-specific, while flag-specific spatial deviations
+are modeled on a dedicated full-domain mesh.
 
 ## Overview
 
-The model supports:
+This package is designed for multi-area CPUE standardization based on the
+same general modeling framework as **intCPUE**.
 
-- spatiotemporal random fields via an SPDE mesh (using `fmesher`)
+The main design is:
 
-- multiple fleets / surveys through catchability components
+- vessel effects are shared across areas
+- fishery-level mean differences are shared across areas
+- flag-specific temporal deviations are shared across areas
+- catchability smooths are shared across areas
+- temporal effects are area-specific
+- spatial and spatiotemporal population fields are area-specific
+- flag-specific spatial deviations use a dedicated full-domain mesh
+- observation-error parameters remain area-specific
 
-- mgcv-style `s()` smooth terms parsed into mixed-effects from inside
-  TMB
+The package keeps the core `intCPUE` workflow:
 
-This is currently a Poisson-link delta model. The baseline population
-surface is always driven by temporal effects together with spatial and
-spatiotemporal random fields. Vessel effects and systematic fishery
-differences are part of the core model. The user-facing switches
-currently control the spatiotemporal population evolution type
-(`pop_spatiotemporal_type`), the time-varying and spatial
-fishery-specific catchability deviations (`q_diffs_time`,
-`q_diffs_spatial`), and the observation-SD structure (`obs_sd`). Smooth
-terms can be assigned either to catchability only or to the population
-layer. Population-layer smooths are included both in the observation
-model and in projection, so they affect the standardized index.
+- build projected coordinates with `make_utm()`
+- build meshes with `make_mesh()`
+- fit the model with `intCPUE()`
+- extract standardized indices with `get_index()`
 
-Here provides a minimal workflow: install → data preparation →
-coordinate projection → mesh → model fitting → index extraction.
+This is currently a delta CPUE model with shared vessel effects,
+fishery effects, flag-time effects, and catchability smooths across
+areas, together with area-specific temporal, spatial, and
+spatiotemporal population components. Flag-specific spatial deviations
+are shared across areas through a dedicated full-domain mesh. Smooth
+terms can be assigned either to catchability or to the population
+layer.
 
+Here provides a minimal workflow: install → data preparation → coordinate projection → mesh → model fitting → index extraction.
+    
 ## Contact
 
 For questions, suggestions, or collaboration, please contact:
@@ -62,44 +61,45 @@ For questions, suggestions, or collaboration, please contact:
 
 ## Citation
 
-If you use **intCPUE** in your work, please cite it as software:
+If you use **intCPUEextra** in your work, please cite it as software:
 
-> Bi, R. (2026). *intCPUE: Integrated CPUE standardization with TMB*. R
-> package (v0.1.0). <https://github.com/RujiaBi/intCPUE>.
+> Bi, R. (2026). *intCPUEextra: Integrated CPUE standardization with TMB*. R package (v0.1.0).
 
 Once a paper or DOI is available, this section will be updated.
 
-## Installation (development version)
+## Installation
 
-``` r
-# install.packages("remotes")
-remotes::install_github("RujiaBi/intCPUE")
+```r
+remotes::install_local(".")
 ```
 
-``` r
-library(intCPUE)
+```r
+library(intCPUEextra)
 ```
 
-## Data structure
+## Basic usage
 
-An intCPUE model requires a data frame containing the following columns:
+### Single-area fit
 
-- `cpue` — positive catch rate
+If `area_col` is not supplied, the model runs as a single-area fit.
 
-- `encounter` — encounter indicator (0 = zero catch, 1 = positive catch)
+An `intCPUEextra` model requires a data frame containing the following columns:
 
-- `lon`, `lat` — geographic coordinates
+* `cpue` — positive catch rate  
 
-- `vesid` — vessel ID (0-based)
+* `encounter` — encounter indicator (0 = zero catch, 1 = positive catch)  
 
-- `tid` — time index (0-based)
+* `lon`, `lat` — geographic coordinates  
 
-- `flagid` — fishery / survey ID (0-based; 0 = reference fishery)
+* `vesid` — vessel ID (0-based)  
 
-These columns are required. Additional columns may be included as
-needed.
+* `tid` — time index (0-based)  
 
-``` r
+* `flagid` — fishery / survey ID (0-based; 0 = reference fishery)
+
+These columns are required. Additional columns may be included as needed.
+
+```r
 # Use `pcod` from `sdmTMB` as an example
 data_input <- data.frame(
   "cpue" = pcod$density,
@@ -119,6 +119,17 @@ data_input <- data.frame(
 
 - `flagid` must use 0 as the reference fishery / survey
 
+### Multi-area fit
+
+For multi-area fitting:
+
+- `data_utm` must contain an area column
+- `mesh` must be a named list with one mesh per area
+- vessel effects are shared across areas
+- `flag_f` and `flag_t` are shared across areas
+- if `q_diffs_spatial = "on"`, supply `flag_mesh` as a full-domain mesh for `flag_s`
+- population time/space structure is estimated separately by area
+
 ## Coordinate projection (lon/lat → UTM)
 
 Longitude may be in either -180..180 or 0..360.
@@ -131,7 +142,7 @@ Longitude may be in either -180..180 or 0..360.
 
 - scales coordinates for numerical stability
 
-``` r
+```r
 utm <- make_utm(data_input, utm_zone = NULL, coord_scale = "auto")
 data_utm <- utm$data_utm
 ```
@@ -143,21 +154,19 @@ The mesh must be constructed using the scaled projected coordinates:
 
 ### K-means mesh
 
-``` r
+```r
 mesh <- make_mesh(data_utm, xy_cols = c("utm_x_scale", "utm_y_scale"), type = "kmeans", n_knots = 50)
 plot(mesh)
 ```
 
 ### Cutoff mesh
-
-``` r
+```r
 mesh <- make_mesh(data_utm, xy_cols = c("utm_x_scale", "utm_y_scale"), type = "cutoff", cutoff = 0.1)
 plot(mesh)
 ```
 
 ### Tailor mesh
-
-``` r
+```r
 mesh <- make_mesh(data_utm, xy_cols = c("utm_x_scale", "utm_y_scale"), type = "tailored",
     convex = -0.1,         # for a finer boundary
     max.edge = c(0.5, 2),   # max triangle edge length; inner and outer meshes
@@ -167,8 +176,7 @@ plot(mesh)
 ```
 
 ### Custom mesh
-
-``` r
+```r
 bnd <- INLA::inla.nonconvex.hull(cbind(data_utm$utm_x_scale, data_utm$utm_y_scale), convex = -0.1)
 mesh_inla <- INLA::inla.mesh.2d(
   boundary = bnd,
@@ -180,11 +188,10 @@ plot(mesh)
 
 ## Fit the model
 
-``` r
+```r
 formula_catchability <- ~ s(depth)
 formula_population <- ~ s(temp) + s(chl)
 ```
-
 Interpretation of the baseline model:
 
 Both encounter and positive components include:
@@ -195,37 +202,23 @@ Both encounter and positive components include:
 
 - spatiotemporal random field (`epsilon`)
 
-`formula_catchability` adds smooth covariates that affect catchability
-only.
+`formula_catchability` adds smooth covariates that affect catchability only.
 
-`formula_population` adds smooth covariates that affect the latent
-population surface and therefore also enter projection. When population
-covariates are not uniquely defined within each extrapolation cell,
-provide them explicitly through `projection_data`. If they also vary
-over time, include a `tid` column in `projection_data` so the projection
-covariates are matched by grid cell and time.
+`formula_population` adds smooth covariates that affect the latent population surface and therefore also enter projection. When population covariates are not uniquely defined within each extrapolation cell, provide them explicitly through `projection_data`. If they also vary over time, include a `tid` column in `projection_data` so the projection covariates are matched by grid cell and time.
 
-The legacy `formula = ...` interface is still supported and is treated
-as `formula_catchability = ...`.
+The legacy `formula = ...` interface is still supported and is treated as `formula_catchability = ...`.
 
 ### `projection_data` format
 
-If `formula_population` is used, population covariates must be available
-on the extrapolation grid:
+If `formula_population` is used, population covariates must be available on the extrapolation grid:
 
-- Static population covariates: `projection_data` should contain one row
-  per extrapolation grid cell, with columns `utm_x_scale`,
-  `utm_y_scale`, and the covariates used in `formula_population`.
-- Time-varying population covariates: `projection_data` should contain
-  one row per grid cell-time combination, with columns `utm_x_scale`,
-  `utm_y_scale`, `tid`, and the covariates used in `formula_population`.
-- If `formula_population` mixes static and time-varying covariates, use
-  the grid cell-time format and repeat the static covariate values
-  across `tid`.
+- Static population covariates: `projection_data` should contain one row per extrapolation grid cell, with columns `utm_x_scale`, `utm_y_scale`, and the covariates used in `formula_population`.
+- Time-varying population covariates: `projection_data` should contain one row per grid cell-time combination, with columns `utm_x_scale`, `utm_y_scale`, `tid`, and the covariates used in `formula_population`.
+- If `formula_population` mixes static and time-varying covariates, use the grid cell-time format and repeat the static covariate values across `tid`.
 
 `tid` must use the same 0-based coding as `data_utm$tid`.
 
-``` r
+```r
 ncores <- 4
 mesh <- make_mesh(data_utm, xy_cols = c("utm_x_scale", "utm_y_scale"), type = "cutoff", cutoff = 0.1)
 fit <- intCPUE(
@@ -239,44 +232,64 @@ fit <- intCPUE(
 )
 ```
 
+Example for multi-area fitting:
+
+```r
+flag_mesh <- make_mesh(
+  data_utm,
+  xy_cols = c("utm_x_scale", "utm_y_scale"),
+  type = "cutoff",
+  cutoff = 0.1
+)
+
+fit <- intCPUE(
+  data_utm = data_utm,
+  mesh = mesh_list,
+  area_col = "area",
+  flag_mesh = flag_mesh,
+  pop_spatiotemporal_type = "rw",
+  q_diffs_time = "on",
+  q_diffs_spatial = "on",
+  obs_sd = "shared"
+)
+```
+
 ### Core model components
 
-- `pop_spatiotemporal_type` — temporal dependence for the population
-  spatiotemporal field (`"rw"` or `"ar1"`)
+* `pop_spatiotemporal_type` — temporal dependence for the population spatiotemporal field (`"rw"` or `"ar1"`)
 
 The current package version fits a fixed core model with:
 
-- population spatial and spatiotemporal random fields turned on
+* population spatial and spatiotemporal random fields turned on
 
-- vessel effects turned on
+* vessel effects turned on
 
-- systematic fishery catchability differences turned on
+* systematic fishery catchability differences turned on
 
 ### User-facing switches
 
-- `q_diffs_time` — time-varying catchability difference
+* `q_diffs_time` — time-varying catchability difference 
 
-- `q_diffs_spatial` — spatial catchability difference
+* `q_diffs_spatial` — spatial catchability difference
 
-For the reference fishery (`flagid = 0`), the `q_diffs_*` terms are
-constrained to 0.
+For the reference fishery (`flagid = 0`), the `q_diffs_*` terms are constrained to 0.
 
 ### Observation error
 
-- `obs_sd = "shared"` uses one lognormal observation SD across all flags
+* `obs_sd = "shared"` uses one lognormal observation SD across all flags
 
-- `obs_sd = "flag"` estimates one lognormal observation SD for each flag
+* `obs_sd = "flag"` estimates one lognormal observation SD for each flag
 
 ## Getting index with bias correction
 
-``` r
+```r
 index <- get_index(fit)
 plot_index(index)
 ```
 
 ## Diagnostics
 
-``` r
+```r
 check_convergence(fit)
 calc_marginal_aic(fit)
 

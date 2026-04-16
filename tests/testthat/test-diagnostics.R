@@ -282,3 +282,18 @@ test_that("diagnostic helpers return expected objects for a fitted model", {
   fitted_alias <- get_fitted(fit)
   expect_equal(fitted_alias$fitted, pred$fitted)
 })
+
+test_that("plot_index keeps areas as separate grouped series", {
+  skip_if_not_installed("ggplot2")
+
+  idx <- data.frame(
+    areaid = rep(c("A", "B"), each = 3),
+    time = rep(1:3, times = 2),
+    index = c(1, 2, 3, 2, 3, 4),
+    cv = c(0.1, 0.2, 0.3, 0.15, 0.25, 0.35)
+  )
+
+  p <- plot_index(idx, time_values = c(2001, 2002, 2003))
+  expect_s3_class(p, "ggplot")
+  expect_equal(length(unique(ggplot2::ggplot_build(p)$data[[1]]$group)), 2L)
+})

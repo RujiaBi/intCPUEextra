@@ -19,10 +19,13 @@ plot_anisotropy <- function(
     n_points = 361L
 ) {
   par_best <- NULL
-  rep_obj <- NULL
+  area_levels <- "1"
 
   if (inherits(object, "intCPUE")) {
     par_best <- object$obj$env$last.par.best
+    if (!is.null(object$prep$area_levels)) {
+      area_levels <- as.character(object$prep$area_levels)
+    }
   } else if (is.list(object) &&
              !is.null(object$obj) &&
              !is.null(object$obj$env) &&
@@ -37,35 +40,28 @@ plot_anisotropy <- function(
     )
   }
 
-  if ((inherits(object, "intCPUE") || (is.list(object) && !is.null(object$obj)))) {
-    rep_obj <- try(object$obj$report(par_best), silent = TRUE)
-  }
-
   ln_H_input <- as.numeric(par_best[grep("^ln_H_input", names(par_best))])
-  if (length(ln_H_input) != 2L) {
-    stop("Could not find the two anisotropy parameters `ln_H_input`.", call. = FALSE)
+  if (length(ln_H_input) %% 2L != 0L || length(ln_H_input) < 2L) {
+    stop("Could not find a valid set of anisotropy parameters `ln_H_input`.", call. = FALSE)
   }
-
-  H <- matrix(
-    c(
-      exp(ln_H_input[1]), ln_H_input[2],
-      ln_H_input[2], (1 + ln_H_input[2]^2) / exp(ln_H_input[1])
-    ),
-    nrow = 2,
-    byrow = TRUE
-  )
-
-  eig <- eigen(H)
+  n_a <- length(ln_H_input) / 2L
+  if (length(area_levels) != n_a) {
+    area_levels <- as.character(seq_len(n_a))
+  }
 
   extract_range <- function(idx) {
     nm_range <- paste0("ln_range_", idx)
     nm_kappa <- paste0("ln_kappa_", idx)
 
     if (nm_range %in% names(par_best)) {
-      return(exp(unname(par_best[[nm_range]])))
+      vals <- exp(unname(par_best[[nm_range]]))
+      if (length(vals) == 1L && n_a > 1L) vals <- rep(vals, n_a)
+      return(vals)
     }
     if (nm_kappa %in% names(par_best)) {
-      return(sqrt(8.0) / exp(unname(par_best[[nm_kappa]])))
+      vals <- sqrt(8.0) / exp(unname(par_best[[nm_kappa]]))
+      if (length(vals) == 1L && n_a > 1L) vals <- rep(vals, n_a)
+      return(vals)
     }
 
     stop(
@@ -74,7 +70,8 @@ plot_anisotropy <- function(
     )
   }
 
-  ranges <- c(extract_range(1), extract_range(2))
+  ranges_1 <- extract_range(1)
+  ranges_2 <- extract_range(2)
 
   if (length(colors) != 2L) {
     stop("`colors` must have length 2.", call. = FALSE)
@@ -87,49 +84,69 @@ plot_anisotropy <- function(
     stop("`n_points` must be an integer >= 20.", call. = FALSE)
   }
 
-  make_axes <- function(range_val, label) {
+  make_axes <- function(H, range_val, label) {
+    eig <- eigen(H)
     major <- eig$vectors[, 1] * eig$values[1] * range_val
     minor <- eig$vectors[, 2] * eig$values[2] * range_val
     list(major = major, minor = minor, label = label)
   }
 
-  axis_list <- list(
-    make_axes(ranges[1], labels[1]),
-    make_axes(ranges[2], labels[2])
-  )
-
   theta <- seq(0, 2 * pi, length.out = n_points)
-  ellipse_df <- do.call(
-    rbind,
-    lapply(seq_along(axis_list), function(i) {
-      ax <- axis_list[[i]]
-      xy <- vapply(
-        theta,
-        function(th) ax$major * cos(th) + ax$minor * sin(th),
-        numeric(2)
-      )
-      data.frame(
-        x = xy[1, ],
-        y = xy[2, ],
-        component = ax$label
-      )
-    })
-  )
+  ellipse_parts <- vector("list", n_a)
+  axis_parts <- vector("list", n_a)
 
-  axis_df <- do.call(
-    rbind,
-    lapply(seq_along(axis_list), function(i) {
-      ax <- axis_list[[i]]
-      data.frame(
-        x = c(-ax$major[1], ax$major[1], -ax$minor[1], ax$minor[1]),
-        y = c(-ax$major[2], ax$major[2], -ax$minor[2], ax$minor[2]),
-        xend = c(ax$major[1], -ax$major[1], ax$minor[1], -ax$minor[1]),
-        yend = c(ax$major[2], -ax$major[2], ax$minor[2], -ax$minor[2]),
-        component = ax$label,
-        axis_type = rep(c("major", "major", "minor", "minor"), each = 1L)
-      )
-    })
-  )
+  for (a in seq_len(n_a)) {
+    H <- matrix(
+      c(
+        exp(ln_H_input[(2L * a) - 1L]), ln_H_input[2L * a],
+        ln_H_input[2L * a], (1 + ln_H_input[2L * a]^2) / exp(ln_H_input[(2L * a) - 1L])
+      ),
+      nrow = 2,
+      byrow = TRUE
+    )
+
+    axis_list <- list(
+      make_axes(H, ranges_1[a], labels[1]),
+      make_axes(H, ranges_2[a], labels[2])
+    )
+
+    ellipse_parts[[a]] <- do.call(
+      rbind,
+      lapply(seq_along(axis_list), function(i) {
+        ax <- axis_list[[i]]
+        xy <- vapply(
+          theta,
+          function(th) ax$major * cos(th) + ax$minor * sin(th),
+          numeric(2)
+        )
+        data.frame(
+          x = xy[1, ],
+          y = xy[2, ],
+          component = ax$label,
+          areaid = area_levels[a]
+        )
+      })
+    )
+
+    axis_parts[[a]] <- do.call(
+      rbind,
+      lapply(seq_along(axis_list), function(i) {
+        ax <- axis_list[[i]]
+        data.frame(
+          x = c(-ax$major[1], ax$major[1], -ax$minor[1], ax$minor[1]),
+          y = c(-ax$major[2], ax$major[2], -ax$minor[2], ax$minor[2]),
+          xend = c(ax$major[1], -ax$major[1], ax$minor[1], -ax$minor[1]),
+          yend = c(ax$major[2], -ax$major[2], ax$minor[2], -ax$minor[2]),
+          component = ax$label,
+          axis_type = rep(c("major", "major", "minor", "minor"), each = 1L),
+          areaid = area_levels[a]
+        )
+      })
+    )
+  }
+
+  ellipse_df <- do.call(rbind, ellipse_parts)
+  axis_df <- do.call(rbind, axis_parts)
 
   lim <- max(abs(c(ellipse_df$x, ellipse_df$y)), na.rm = TRUE) * 1.1
 
@@ -155,6 +172,7 @@ plot_anisotropy <- function(
       colour = NULL,
       title = "Distance at 10% correlation"
     ) +
+    ggplot2::facet_wrap(~ areaid) +
     ggplot2::theme_bw() +
     ggplot2::theme(
       panel.grid.minor = ggplot2::element_blank(),

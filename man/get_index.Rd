@@ -12,7 +12,7 @@ get_index(
 )
 }
 \arguments{
-\item{object}{An object of class \code{intCPUE} returned by \code{\link[=intCPUE]{intCPUE()}}.}
+\item{object}{An object of class \code{intCPUE} returned by \code{\link[intCPUE:intCPUE]{intCPUE::intCPUE()}}.}
 
 \item{level}{Confidence level for intervals. Default 0.95.}
 
@@ -24,7 +24,8 @@ Default uses sparse + lowrank for memory efficiency.}
 \value{
 A data.frame with columns:
 \itemize{
-\item time: 1:n_t
+\item areaid: area label
+\item time: 1:n_t within each area
 \item index: bias-corrected index (original scale)
 \item log_index: log(index)
 \item cv: SE on log scale (from sdreport for ADREPORT(link_total))
@@ -34,4 +35,5 @@ A data.frame with columns:
 \description{
 Computes a bias-corrected index on the original scale using the "epsilon trick"
 (via eps_index) and returns log-scale SE from sdreport (ADREPORT(link_total)).
+In multi-area fits, one index series is returned per area.
 }

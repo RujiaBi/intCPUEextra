@@ -1,11 +1,11 @@
 ---
-title: "Getting started with intCPUE"
+title: "Getting started with intCPUEextra"
 output:
   rmarkdown::html_vignette:
     toc: true
     toc_depth: 2
 vignette: >
-  %\VignetteIndexEntry{Getting started with intCPUE}
+  %\VignetteIndexEntry{Getting started with intCPUEextra}
   %\VignetteEncoding{UTF-8}
   %\VignetteEngine{knitr::rmarkdown}
 ---
@@ -23,18 +23,28 @@ knitr::opts_chunk$set(
 
 # Overview
 
-**intCPUE** is a TMB-based framework for integrated CPUE standardization across multiple fisheries or surveys,
-with optional preferential sampling correction (under development).
+**intCPUEextra** is a multi-area extension of **intCPUE**.
 
-The model supports:
+Its main design is simple:
 
-- spatiotemporal random fields via an SPDE mesh (using `fmesher`)
+- vessel effects are shared across areas
+- fishery-level mean differences are shared across areas
+- flag-specific temporal deviations are shared across areas
+- catchability smooths are shared across areas
+- temporal effects and latent population structure are area-specific
+- flag-specific spatial deviations use a dedicated full-domain mesh
 
-- multiple fleets / surveys through catchability components
+This package is intended for joint multi-area CPUE standardization when
+vessel behavior, fishery effects, and flag-time effects are expected to
+be comparable across areas, while temporal effects and latent
+population structure remain area-specific.
 
-- mgcv-style `s()` smooth terms parsed into mixed-effects from inside TMB
+The model keeps the same broad workflow as **intCPUE**:
 
-This is currently a Poisson-link delta model. The baseline population surface is always driven by temporal effects together with spatial and spatiotemporal random fields. Vessel effects and systematic fishery differences are part of the core model. The user-facing switches currently control the spatiotemporal population evolution type (`pop_spatiotemporal_type`), the time-varying and spatial fishery-specific catchability deviations (`q_diffs_time`, `q_diffs_spatial`), and the observation-SD structure (`obs_sd`). Smooth terms can be assigned either to catchability only or to the population layer. Population-layer smooths are included both in the observation model and in projection, so they affect the standardized index.
+- project coordinates with `make_utm()`
+- build meshes with `make_mesh()`
+- fit the model with `intCPUE()`
+- extract standardized indices with `get_index()`
 
 Here provides a minimal workflow: install → data preparation → coordinate projection → mesh → model fitting → index extraction.
 
@@ -42,16 +52,16 @@ Here provides a minimal workflow: install → data preparation → coordinate pr
 
 ```r
 # install.packages("remotes")
-remotes::install_github("RujiaBi/intCPUE")
+remotes::install_local(".")
 ```
 
 ```r
-library(intCPUE)
+library(intCPUEextra)
 ```
 
 # Data structure
 
-An intCPUE model requires a data frame containing the following columns:
+An intCPUEextra model requires a data frame containing the following columns:
 
 * `cpue` — positive catch rate  
 

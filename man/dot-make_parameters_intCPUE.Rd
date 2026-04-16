@@ -5,10 +5,12 @@
 \title{Internal: Build initial parameter list for the intCPUE TMB model}
 \usage{
 .make_parameters_intCPUE(
+  n_a,
   n_t,
   n_v,
   n_f,
   n_s,
+  n_s_flag = n_s,
   n_flag_t_free = 0L,
   use_q_diffs_time = TRUE,
   use_q_diffs_spatial = TRUE,

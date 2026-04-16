@@ -2,7 +2,7 @@
 % Please edit documentation in R/fit.R
 \name{intCPUE}
 \alias{intCPUE}
-\title{Fit an integrated spatiotemporal CPUE standardization model}
+\title{Fit a multi-area CPUE standardization model based on intCPUE}
 \usage{
 intCPUE(
   formula = NULL,
@@ -11,6 +11,8 @@ intCPUE(
   formula_catchability = NULL,
   formula_population = NULL,
   projection_data = NULL,
+  area_col = NULL,
+  flag_mesh = NULL,
   q_diffs_time = c("on", "off"),
   q_diffs_spatial = c("on", "off"),
   pop_spatiotemporal_type = c("rw", "ar1"),
@@ -48,6 +50,17 @@ time-varying population covariates, additionally include \code{tid} and supply
 one row per grid cell-time combination. If \code{formula_population} mixes
 static and time-varying covariates, use the grid cell-time format and
 repeat static covariate values across \code{tid}.}
+
+\item{area_col}{Optional area column in \code{data_utm}. If supplied and it
+identifies multiple areas, areas share vessel effects and catchability
+smooths and flag-specific non-spatial effects, while fishery-level mean
+differences and temporal/spatial population structure remain area-specific.
+Use a named list of meshes with one entry per area when fitting multiple
+areas.}
+
+\item{flag_mesh}{Optional dedicated mesh for the shared flag-specific
+spatial field (\code{flag_s}). When fitting multiple areas with
+\code{q_diffs_spatial = "on"}, supply a single full-domain mesh here.}
 
 \item{q_diffs_time}{"on" or "off". Controls whether flag-specific temporal
 deviations are included. Implemented via dedicated TMB templates rather
@@ -88,18 +101,19 @@ single \code{nlminb()} pass.}
 An object of class \code{intCPUE} with elements \code{obj}, \code{opt}, \code{rep}, \code{prep}, etc.
 }
 \description{
-Fits an integrated spatiotemporal model for CPUE standardization that jointly
-models observation and sampling processes across one or more fisheries or surveys.
-The framework is designed to reduce bias caused by preferential sampling,
-targeting behavior, and heterogeneous effort distributions, and to estimate
-a coherent latent abundance index.
+Fits a multi-area extension of \code{intCPUE} for CPUE standardization. This
+version is designed for settings where vessel effects and catchability
+smooths are shared across areas, fishery-level mean differences and
+flag-specific temporal deviations are shared across areas, and temporal
+effects and latent population structure are estimated separately by area.
+Flag-specific spatial deviations are modeled on a dedicated full-domain
+mesh via \code{flag_mesh}, with their own anisotropy, range, and SD parameters.
 }
 \details{
 The model is implemented using Template Model Builder (TMB). Spatial and
-spatiotemporal random fields are represented using the SPDE (stochastic partial
-differential equation) approach for computational efficiency. See the model
-description vignette for details:
-https://github.com/RujiaBi/intCPUE/blob/main/vignettes/intCPUE-intro.Rmd
+spatiotemporal random fields are represented using the SPDE approach for
+computational efficiency. See the vignette for details:
+https://github.com/RujiaBi/intCPUEextra/blob/main/vignettes/intCPUEextra-intro.Rmd
 }
 \author{
 Rujia Bi \email{rbi@iattc.org}

@@ -2,6 +2,7 @@
 #'
 #' Computes a bias-corrected index on the original scale using the "epsilon trick"
 #' (via eps_index) and returns log-scale SE from sdreport (ADREPORT(link_total)).
+#' In multi-area fits, one index series is returned per area.
 #'
 #' @param object An object of class `intCPUE` returned by [intCPUE::intCPUE()].
 #' @param level Confidence level for intervals. Default 0.95.
@@ -11,7 +12,8 @@
 #'
 #' @return A data.frame with columns:
 #'   \itemize{
-#'     \item time: 1:n_t
+#'     \item areaid: area label
+#'     \item time: 1:n_t within each area
 #'     \item index: bias-corrected index (original scale)
 #'     \item log_index: log(index)
 #'     \item cv: SE on log scale (from sdreport for ADREPORT(link_total))
@@ -37,26 +39,32 @@ get_index <- function(
   random <- object$random
   ncores <- object$settings$ncores
   
-  if (is.null(data$n_t)) {
-    stop("`object$data_tmb$n_t` is missing. Cannot determine index length.", call. = FALSE)
+  if (is.null(data$n_t) || is.null(data$n_a)) {
+    stop("`object$data_tmb$n_t`/`n_a` is missing. Cannot determine index length.", call. = FALSE)
   }
   n_t <- as.integer(data$n_t)
+  n_a <- as.integer(data$n_a)
+  area_levels <- object$prep$area_levels
+  if (is.null(area_levels) || length(area_levels) != n_a) {
+    area_levels <- as.character(seq_len(n_a))
+  }
   
   # --- 1) log-scale SE from sdreport (ADREPORT(link_total)) ---
   ssr <- summary(rep, "report")
-  if (!("link_total" %in% rownames(ssr))) {
+  keep_link <- grepl("^link_total(\\[|$)", rownames(ssr))
+  if (!any(keep_link)) {
     stop("`link_total` not found in sdreport(summary(rep, 'report')). Did you ADREPORT(link_total) in C++?",
          call. = FALSE)
   }
-  log_se <- ssr[rownames(ssr) == "link_total", "Std. Error"]
-  if (length(log_se) != n_t) {
+  log_se <- ssr[keep_link, "Std. Error"]
+  if (length(log_se) != n_t * n_a) {
     stop("Unexpected length of log SE for link_total: got ", length(log_se),
-         ", expected n_t=", n_t, ".", call. = FALSE)
+         ", expected n_t*n_a=", n_t * n_a, ".", call. = FALSE)
   }
   
   # --- 2) bias correction step using eps_index gradient ---
   parhat <- obj$env$parList(opt$par)
-  parhat[["eps_index"]] <- rep(0, n_t)
+  parhat[["eps_index"]] <- rep(0, n_t * n_a)
   
   if (!is.null(ncores)) {
     ncores <- as.integer(ncores)
@@ -90,10 +98,10 @@ get_index <- function(
   }
   
   index_bc <- as.numeric(grad[nm == "eps_index"])
-  if (length(index_bc) != n_t) {
+  if (length(index_bc) != n_t * n_a) {
     stop(
       "Bias-corrected index length mismatch: got ", length(index_bc),
-      ", expected n_t=", n_t, ".",
+      ", expected n_t*n_a=", n_t * n_a, ".",
       call. = FALSE
     )
   }
@@ -110,7 +118,8 @@ get_index <- function(
   z <- stats::qnorm(1 - (1 - level)/2)
   
   out <- data.frame(
-    time = seq_len(n_t),
+    areaid = rep(area_levels, each = n_t),
+    time = rep(seq_len(n_t), times = n_a),
     index = index_bc,
     log_index = log_index_bc,
     cv = log_se,

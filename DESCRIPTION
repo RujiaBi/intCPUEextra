@@ -1,15 +1,17 @@
-Package: intCPUE
+Package: intCPUEextra
 Type: Package
-Title: Integrated Spatiotemporal CPUE Standardization via TMB
+Title: Multi-Area CPUE Standardization Based on intCPUE
 Version: 0.2.0
 Date: 2026-03-02
 Authors@R: 
     person("Rujia", "Bi", , "rbi@iattc.org", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-1954-6797"))
-Description: Provides an integrated framework for catch-per-unit-effort (CPUE)
-    standardization using Template Model Builder (TMB). The model supports
-    joint analysis of multiple fisheries or surveys, spatiotemporal random
-    fields via SPDE, and optional correction for preferential sampling.
+Description: Extends intCPUE to joint multi-area catch-per-unit-effort (CPUE)
+    standardization using Template Model Builder (TMB). Vessel effects,
+    fishery-level mean differences, and flag-specific temporal deviations are
+    shared across areas. Temporal and latent population components remain
+    area-specific, while flag-specific spatial deviations use a dedicated
+    full-domain mesh with their own anisotropy and covariance parameters.
 License: GPL-3
 Notice: inst/NOTICE
 Depends:
@@ -32,8 +34,8 @@ Suggests:
     testthat (>= 3.0.0)
 VignetteBuilder:
     knitr	
-URL: https://github.com/RujiaBi/intCPUE
-BugReports: https://github.com/RujiaBi/intCPUE/issues
+URL: https://github.com/RujiaBi/intCPUEextra
+BugReports: https://github.com/RujiaBi/intCPUEextra/issues
 ByteCompile: true
 Config/testthat/edition: 3
 Config/testthat/parallel: true

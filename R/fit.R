@@ -1,19 +1,20 @@
-#' @useDynLib intCPUE, .registration = TRUE
+#' @useDynLib intCPUEextra, .registration = TRUE
 NULL
 
-#' Fit an integrated spatiotemporal CPUE standardization model
+#' Fit a multi-area CPUE standardization model based on intCPUE
 #'
-#' Fits an integrated spatiotemporal model for CPUE standardization that jointly
-#' models observation and sampling processes across one or more fisheries or surveys.
-#' The framework is designed to reduce bias caused by preferential sampling,
-#' targeting behavior, and heterogeneous effort distributions, and to estimate
-#' a coherent latent abundance index.
+#' Fits a multi-area extension of `intCPUE` for CPUE standardization. This
+#' version is designed for settings where vessel effects and catchability
+#' smooths are shared across areas, fishery-level mean differences and
+#' flag-specific temporal deviations are shared across areas, and temporal
+#' effects and latent population structure are estimated separately by area.
+#' Flag-specific spatial deviations are modeled on a dedicated full-domain
+#' mesh via `flag_mesh`, with their own anisotropy, range, and SD parameters.
 #'
 #' The model is implemented using Template Model Builder (TMB). Spatial and
-#' spatiotemporal random fields are represented using the SPDE (stochastic partial
-#' differential equation) approach for computational efficiency. See the model
-#' description vignette for details:
-#' https://github.com/RujiaBi/intCPUE/blob/main/vignettes/intCPUE-intro.Rmd
+#' spatiotemporal random fields are represented using the SPDE approach for
+#' computational efficiency. See the vignette for details:
+#' https://github.com/RujiaBi/intCPUEextra/blob/main/vignettes/intCPUEextra-intro.Rmd
 #'
 #' @param formula Legacy one-sided or two-sided model formula with optional
 #'   mgcv::s() smooth terms. If supplied, it is treated as
@@ -33,6 +34,15 @@ NULL
 #'   one row per grid cell-time combination. If `formula_population` mixes
 #'   static and time-varying covariates, use the grid cell-time format and
 #'   repeat static covariate values across `tid`.
+#' @param area_col Optional area column in `data_utm`. If supplied and it
+#'   identifies multiple areas, areas share vessel effects and catchability
+#'   smooths and flag-specific non-spatial effects, while fishery-level mean
+#'   differences and temporal/spatial population structure remain area-specific.
+#'   Use a named list of meshes with one entry per area when fitting multiple
+#'   areas.
+#' @param flag_mesh Optional dedicated mesh for the shared flag-specific
+#'   spatial field (`flag_s`). When fitting multiple areas with
+#'   `q_diffs_spatial = "on"`, supply a single full-domain mesh here.
 #' @param q_diffs_time "on" or "off". Controls whether flag-specific temporal
 #'   deviations are included. Implemented via dedicated TMB templates rather
 #'   than `map`.
@@ -46,7 +56,7 @@ NULL
 #'   lognormal observation SD is estimated separately for each flag.
 #' @param control Control list passed to [stats::nlminb()].
 #' @param ncores Optional integer. If provided, sets the number of OpenMP threads. Passed to [TMB::openmp()].
-#' @param ... Passed to [intCPUE::make_data()] (for example, `area_scale`).
+#' @param ... Passed to [intCPUEextra::make_data()] (for example, `area_scale`).
 #' @param silent Logical. Passed to [TMB::MakeADFun()].
 #' @param restart_max Non-negative integer. Maximum number of automatic
 #'   `nlminb()` restarts attempted from the current best parameter vector when
@@ -68,6 +78,8 @@ intCPUE <- function(
     formula_catchability = NULL,
     formula_population = NULL,
     projection_data = NULL,
+    area_col = NULL,
+    flag_mesh = NULL,
     q_diffs_time = c("on", "off"),
     q_diffs_spatial = c("on", "off"),
     pop_spatiotemporal_type = c("rw", "ar1"),
@@ -89,6 +101,17 @@ intCPUE <- function(
   coord_max <- .validate_nonneg_count(coord_max, "coord_max")
   
   data_utm <- as.data.frame(data_utm)
+
+  if (!is.null(area_col) && q_diffs_spatial == "on" && area_col %in% names(data_utm)) {
+    n_areas_input <- length(unique(as.character(data_utm[[area_col]])))
+    if (n_areas_input > 1L && is.null(flag_mesh)) {
+      stop(
+        "Multi-area fits with `q_diffs_spatial = 'on'` require `flag_mesh` ",
+        "so the shared flag spatial field can use a dedicated full-domain mesh.",
+        call. = FALSE
+      )
+    }
+  }
   
   # ---- 1) Data prep (single source of truth) ----
   prep <- make_data(
@@ -98,16 +121,20 @@ intCPUE <- function(
     formula_catchability = formula_catchability,
     formula_population = formula_population,
     projection_data = projection_data,
+    area_col = area_col,
+    flag_mesh = flag_mesh,
     ...
   )
   
   data_tmb <- prep$data
   
   # ---- 2) Defensive checks (catch mismatches early) ----
+  n_a <- data_tmb$n_a
   n_t <- data_tmb$n_t
   n_v <- data_tmb$n_v
   n_f <- data_tmb$n_f
-  n_s <- data_tmb$spde$n_s
+  n_s <- sum(data_tmb$n_s_area)
+  n_s_flag <- data_tmb$n_s_flag
 
   data_tmb$use_q_diffs_time <- as.integer(q_diffs_time == "on" && n_f > 1L)
   data_tmb$use_q_diffs_spatial <- as.integer(q_diffs_spatial == "on" && n_f > 1L)
@@ -119,14 +146,18 @@ intCPUE <- function(
   flag_t_constraint <- NULL
   if (q_diffs_time == "on" && n_f > 1L) {
     has_tf <- data_tmb$has_tf > 0L
-    flag_t_constraint <- .build_flag_t_constraint(has_tf)
+    flag_t_constraint <- .build_flag_t_constraint(has_tf, n_f = n_f)
     data_tmb$flag_t_index <- matrix(
       as.integer(flag_t_constraint$flag_t_index),
       nrow = nrow(flag_t_constraint$flag_t_index),
       ncol = ncol(flag_t_constraint$flag_t_index)
     )
   } else {
-    data_tmb$flag_t_index <- matrix(integer(0), nrow = 0L, ncol = max(0L, n_f - 1L))
+    data_tmb$flag_t_index <- matrix(
+      integer(n_t * max(0L, n_f - 1L)),
+      nrow = n_t,
+      ncol = max(0L, n_f - 1L)
+    )
   }
   
   # Smooth dims
@@ -142,7 +173,9 @@ intCPUE <- function(
   
   # ---- 3) Initial parameters (must match cpp) ----
   parameters <- .make_parameters_intCPUE(
+    n_a = n_a,
     n_t = n_t, n_v = n_v, n_f = n_f, n_s = n_s,
+    n_s_flag = n_s_flag,
     n_flag_t_free = if (is.null(flag_t_constraint)) 0L else flag_t_constraint$n_free,
     use_q_diffs_time = (q_diffs_time == "on" && n_f > 1L),
     use_q_diffs_spatial = (q_diffs_spatial == "on" && n_f > 1L),
@@ -163,17 +196,27 @@ intCPUE <- function(
     parameters$flag_t_ln_std_dev_2 <- NULL
   }
   if (q_diffs_spatial == "off" || n_f <= 1L) {
+    parameters$ln_H_flag_input <- NULL
     parameters$flag_s_1 <- NULL
     parameters$flag_s_2 <- NULL
+    parameters$ln_range_flag_1 <- NULL
+    parameters$ln_range_flag_2 <- NULL
     parameters$ln_sigma_flag_1 <- NULL
     parameters$ln_sigma_flag_2 <- NULL
   }
+  .check_parameter_shapes_intCPUE(
+    parameters = parameters,
+    data_tmb = data_tmb,
+    q_diffs_time = q_diffs_time,
+    q_diffs_spatial = q_diffs_spatial
+  )
   
   # ---- 4) MAP (turn on/off components without touching cpp) ----
   map <- .make_map_intCPUE(
     parameters = parameters,
     n_f = n_f,
     obs_sd = obs_sd,
+    pop_spatiotemporal_type = pop_spatiotemporal_type,
     q_diffs_time = q_diffs_time,
     has_tf = has_tf,
     estimable_flag = if (is.null(flag_t_constraint)) NULL else flag_t_constraint$estimable_flag
@@ -260,6 +303,8 @@ intCPUE <- function(
       formula = formula,
       formula_catchability = if (is.null(formula_catchability)) formula else formula_catchability,
       formula_population = formula_population,
+      area_col = area_col,
+      flag_mesh = flag_mesh,
       pop_spatiotemporal_type = pop_spatiotemporal_type,
       q_diffs_time = q_diffs_time,
       q_diffs_spatial = q_diffs_spatial,

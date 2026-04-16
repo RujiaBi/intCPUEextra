@@ -15,13 +15,16 @@ plot_index(
 }
 \arguments{
 \item{index_df}{A data.frame returned by \code{\link[=get_index]{get_index()}} containing at least
-\code{time}, \code{index}, and \code{cv}.}
+\code{time}, \code{index}, and \code{cv}. If \code{areaid} is present, each area is drawn as a
+separate colored series.}
 
-\item{time_values}{Optional vector of labels for the x-axis. Must have the
-same length as the number of rows in \code{index_df}.}
+\item{time_values}{Optional vector of labels for the x-axis. It may have the
+same length as \code{nrow(index_df)} or the number of unique values in
+\code{index_df$time}.}
 
-\item{time_positions}{Optional numeric vector of x-axis positions. Must have
-the same length as the number of rows in \code{index_df}.}
+\item{time_positions}{Optional numeric vector of x-axis positions. It may
+have the same length as \code{nrow(index_df)} or the number of unique values in
+\code{index_df$time}.}
 
 \item{x_text_angle}{Optional numeric angle for x-axis text. If \code{NULL},
 \code{plot_index()} uses \code{90} for year-month-like labels and \code{45} otherwise.}

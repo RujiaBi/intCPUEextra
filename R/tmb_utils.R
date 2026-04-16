@@ -54,9 +54,12 @@
   
   # ---- required fields ----
   req <- c(
-    "n_i","n_t","n_v","n_f",
+    "n_a","n_i","n_t","n_v","n_f","n_g",
+    "n_i_area","n_g_area","n_s_area","n_s_flag",
     "b_i","e_i","t_i","v_i","f_i",
-    "A_is","A_gs","spde",
+    "area_i","has_tf","area_g",
+    "A_is","A_gs","A_flag_is","spdes","flag_spde",
+    "matern_range_flag","matern_sigma_flag",
     "has_smooths_catch","Xs_catch","Zs_catch",
     "has_smooths_pop","Xs_pop_i","Zs_pop_i","Xs_pop_g","Zs_pop_g"
   )
@@ -119,6 +122,84 @@
   check_index(data_tmb$t_i, data_tmb$n_t, "t_i")
   check_index(data_tmb$v_i, data_tmb$n_v, "v_i")
   check_index(data_tmb$f_i, data_tmb$n_f, "f_i")
+  check_index(data_tmb$area_i, data_tmb$n_a, "area_i")
+
+  if (length(data_tmb$n_i_area) != data_tmb$n_a || sum(data_tmb$n_i_area) != data_tmb$n_i) {
+    stop("`n_i_area` must have length `n_a` and sum to `n_i`.", call. = FALSE)
+  }
+  if (length(data_tmb$n_g_area) != data_tmb$n_a || sum(data_tmb$n_g_area) != data_tmb$n_g) {
+    stop("`n_g_area` must have length `n_a` and sum to `n_g`.", call. = FALSE)
+  }
+  if (length(data_tmb$n_s_area) != data_tmb$n_a || any(data_tmb$n_s_area < 1L)) {
+    stop("`n_s_area` must have length `n_a` with positive entries.", call. = FALSE)
+  }
+  if (sum(data_tmb$n_s_area) < 1L) {
+    stop("`n_s_area` must sum to a positive total number of mesh vertices.", call. = FALSE)
+  }
+  if (!is.list(data_tmb$spdes) || length(data_tmb$spdes) != data_tmb$n_a) {
+    stop("`spdes` must be a list with one anisotropic SPDE object per area.", call. = FALSE)
+  }
+  if (!is.list(data_tmb$flag_spde) || length(data_tmb$flag_spde) != 1L) {
+    stop("`flag_spde` must be a one-element list containing the dedicated flag SPDE object.", call. = FALSE)
+  }
+  if (!identical(nrow(data_tmb$has_tf), data_tmb$n_t)) {
+    stop("`has_tf` must have `n_t` rows.", call. = FALSE)
+  }
+  if (!identical(ncol(data_tmb$has_tf), max(0L, data_tmb$n_f - 1L))) {
+    stop("`has_tf` must have `(n_f - 1)` columns.", call. = FALSE)
+  }
+  if (length(data_tmb$area_g) != data_tmb$n_g) {
+    stop("`area_g` must have length `n_g`.", call. = FALSE)
+  }
+
+  n_s_total <- sum(data_tmb$n_s_area)
+  if (!inherits(data_tmb$A_is, "sparseMatrix")) {
+    stop("`A_is` must be a sparse matrix.", call. = FALSE)
+  }
+  if (!inherits(data_tmb$A_gs, "sparseMatrix")) {
+    stop("`A_gs` must be a sparse matrix.", call. = FALSE)
+  }
+  if (!inherits(data_tmb$A_flag_is, "sparseMatrix")) {
+    stop("`A_flag_is` must be a sparse matrix.", call. = FALSE)
+  }
+  if (!identical(nrow(data_tmb$A_is), data_tmb$n_i) || !identical(ncol(data_tmb$A_is), n_s_total)) {
+    stop("`A_is` must have dimension `n_i x sum(n_s_area)`.", call. = FALSE)
+  }
+  if (!identical(nrow(data_tmb$A_gs), data_tmb$n_g) || !identical(ncol(data_tmb$A_gs), n_s_total)) {
+    stop("`A_gs` must have dimension `n_g x sum(n_s_area)`.", call. = FALSE)
+  }
+  if (!identical(nrow(data_tmb$A_flag_is), data_tmb$n_i) || !identical(ncol(data_tmb$A_flag_is), data_tmb$n_s_flag)) {
+    stop("`A_flag_is` must have dimension `n_i x n_s_flag`.", call. = FALSE)
+  }
+  if (!is.matrix(data_tmb$Ais_ij) || ncol(data_tmb$Ais_ij) != 2L) {
+    stop("`Ais_ij` must be a two-column matrix of sparse indices.", call. = FALSE)
+  }
+  if (length(data_tmb$Ais_x) != nrow(data_tmb$Ais_ij)) {
+    stop("`Ais_x` must have one entry per row of `Ais_ij`.", call. = FALSE)
+  }
+  if (nrow(data_tmb$Ais_ij) > 0L) {
+    i_rng <- range(data_tmb$Ais_ij[, 1], na.rm = TRUE)
+    s_rng <- range(data_tmb$Ais_ij[, 2], na.rm = TRUE)
+    if (i_rng[1] < 0L || i_rng[2] > data_tmb$n_i - 1L) {
+      stop("`Ais_ij[,1]` must index observations in 0..n_i-1.", call. = FALSE)
+    }
+    if (s_rng[1] < 0L || s_rng[2] > n_s_total - 1L) {
+      stop("`Ais_ij[,2]` must index spatial vertices in 0..sum(n_s_area)-1.", call. = FALSE)
+    }
+  }
+
+  expected_area_i <- rep.int(seq.int(0L, data_tmb$n_a - 1L), times = data_tmb$n_i_area)
+  if (!identical(as.integer(data_tmb$area_i), expected_area_i)) {
+    stop(
+      "`area_i` must be stacked by area in the same order as `n_i_area`. ",
+      "Re-run make_data() and do not reorder rows afterward.",
+      call. = FALSE
+    )
+  }
+
+  if (data_tmb$n_f > 1L && !all(data_tmb$has_tf %in% c(0L, 1L))) {
+    stop("`has_tf` must contain only 0/1 entries.", call. = FALSE)
+  }
 
   if (!identical(nrow(data_tmb$Xs_catch), data_tmb$n_i))
     stop("`Xs_catch` must have `n_i` rows.", call. = FALSE)
@@ -148,6 +229,80 @@
     stop("`Zs_pop_i` and `Zs_pop_g` must have the same length.", call. = FALSE)
   }
   
+  invisible(TRUE)
+}
+
+.check_parameter_shapes_intCPUE <- function(parameters, data_tmb,
+                                            q_diffs_time = c("on", "off"),
+                                            q_diffs_spatial = c("on", "off")) {
+  q_diffs_time <- match.arg(q_diffs_time)
+  q_diffs_spatial <- match.arg(q_diffs_spatial)
+
+  n_a <- as.integer(data_tmb$n_a)
+  n_t <- as.integer(data_tmb$n_t)
+  n_f <- as.integer(data_tmb$n_f)
+  n_s <- sum(as.integer(data_tmb$n_s_area))
+  n_flag_cols <- max(0L, n_f - 1L)
+
+  if (!is.null(parameters$yq_t_1) && !identical(dim(parameters$yq_t_1), c(n_t, n_a))) {
+    stop("`yq_t_1` must have dimension `n_t x n_a`.", call. = FALSE)
+  }
+  if (!is.null(parameters$yq_t_2) && !identical(dim(parameters$yq_t_2), c(n_t, n_a))) {
+    stop("`yq_t_2` must have dimension `n_t x n_a`.", call. = FALSE)
+  }
+
+  n_s_flag <- as.integer(data_tmb$n_s_flag)
+
+  if (!is.null(parameters$flag_f_1) && length(parameters$flag_f_1) != n_flag_cols) {
+    stop("`flag_f_1` must have length `(n_f-1)`.", call. = FALSE)
+  }
+  if (!is.null(parameters$flag_f_2) && length(parameters$flag_f_2) != n_flag_cols) {
+    stop("`flag_f_2` must have length `(n_f-1)`.", call. = FALSE)
+  }
+  if (!is.null(parameters$flag_ln_std_dev_1) && length(parameters$flag_ln_std_dev_1) != 1L) {
+    stop("`flag_ln_std_dev_1` must have length 1.", call. = FALSE)
+  }
+  if (!is.null(parameters$flag_ln_std_dev_2) && length(parameters$flag_ln_std_dev_2) != 1L) {
+    stop("`flag_ln_std_dev_2` must have length 1.", call. = FALSE)
+  }
+
+  if (q_diffs_time == "on" && n_flag_cols > 0L) {
+    if (is.null(parameters$flag_t_1) || is.null(parameters$flag_t_2)) {
+      stop("`flag_t_1/flag_t_2` must exist when `q_diffs_time='on'`.", call. = FALSE)
+    }
+    expected_n_flag_t_free <- sum(data_tmb$flag_t_index >= 0L)
+    if (length(parameters$flag_t_1) != expected_n_flag_t_free) {
+      stop("`flag_t_1` length must equal the number of free cells in `flag_t_index`.", call. = FALSE)
+    }
+    if (length(parameters$flag_t_2) != expected_n_flag_t_free) {
+      stop("`flag_t_2` length must equal the number of free cells in `flag_t_index`.", call. = FALSE)
+    }
+    if (length(parameters$flag_t_ln_std_dev_1) != 1L || length(parameters$flag_t_ln_std_dev_2) != 1L) {
+      stop("`flag_t_ln_std_dev_*` must have length 1.", call. = FALSE)
+    }
+  }
+
+  if (q_diffs_spatial == "on" && n_flag_cols > 0L) {
+    if (is.null(parameters$flag_s_1) || is.null(parameters$flag_s_2)) {
+      stop("`flag_s_1/flag_s_2` must exist when `q_diffs_spatial='on'`.", call. = FALSE)
+    }
+    if (!identical(dim(parameters$ln_H_flag_input), c(1L, 2L))) {
+      stop("`ln_H_flag_input` must have dimension `1 x 2`.", call. = FALSE)
+    }
+    if (!identical(dim(parameters$flag_s_1), c(n_s_flag, n_flag_cols))) {
+      stop("`flag_s_1` must have dimension `n_s_flag x (n_f-1)`.", call. = FALSE)
+    }
+    if (!identical(dim(parameters$flag_s_2), c(n_s_flag, n_flag_cols))) {
+      stop("`flag_s_2` must have dimension `n_s_flag x (n_f-1)`.", call. = FALSE)
+    }
+    if (length(parameters$ln_range_flag_1) != 1L || length(parameters$ln_range_flag_2) != 1L) {
+      stop("`ln_range_flag_*` must have length 1.", call. = FALSE)
+    }
+    if (length(parameters$ln_sigma_flag_1) != 1L || length(parameters$ln_sigma_flag_2) != 1L) {
+      stop("`ln_sigma_flag_*` must have length 1.", call. = FALSE)
+    }
+  }
+
   invisible(TRUE)
 }
 
