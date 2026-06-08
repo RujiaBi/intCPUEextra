@@ -161,7 +161,7 @@ test_that("make_data skips dedicated flag mesh objects when q_diffs_spatial is o
 
 test_that("observation-SD mapping is honored", {
   parameters <- intCPUEextra:::.make_parameters_intCPUE(
-    n_a = 1L,
+    n_a = 2L,
     n_t = 3L,
     n_v = 1L,
     n_f = 2L,
@@ -180,22 +180,48 @@ test_that("observation-SD mapping is honored", {
     n_f = 2L,
     pop_spatiotemporal_type = "rw",
     q_diffs_time = "off",
-    obs_sd = "flag"
+    obs_sd_flag = "flag",
+    obs_sd_area = "area"
   )
 
-  expect_true(is.na(map$ln_sd))
+  expect_true(all(is.na(map$ln_sd)))
   expect_null(map$ln_sd_flag)
 
-  shared_map <- intCPUEextra:::.make_map_intCPUE(
+  shared_flag_area_map <- intCPUEextra:::.make_map_intCPUE(
     parameters = parameters,
     n_f = 2L,
     pop_spatiotemporal_type = "rw",
     q_diffs_time = "off",
-    obs_sd = "shared"
+    obs_sd_flag = "shared",
+    obs_sd_area = "area"
   )
 
-  expect_true(all(is.na(shared_map$ln_sd_flag)))
-  expect_null(shared_map[["ln_sd", exact = TRUE]])
+  expect_true(all(is.na(shared_flag_area_map$ln_sd_flag)))
+  expect_null(shared_flag_area_map[["ln_sd", exact = TRUE]])
+
+  shared_flag_shared_area_map <- intCPUEextra:::.make_map_intCPUE(
+    parameters = parameters,
+    n_f = 2L,
+    pop_spatiotemporal_type = "rw",
+    q_diffs_time = "off",
+    obs_sd_flag = "shared",
+    obs_sd_area = "shared"
+  )
+
+  expect_true(all(is.na(shared_flag_shared_area_map$ln_sd_flag)))
+  expect_equal(nlevels(shared_flag_shared_area_map$ln_sd), 1L)
+
+  flag_shared_area_map <- intCPUEextra:::.make_map_intCPUE(
+    parameters = parameters,
+    n_f = 2L,
+    pop_spatiotemporal_type = "rw",
+    q_diffs_time = "off",
+    obs_sd_flag = "flag",
+    obs_sd_area = "shared"
+  )
+
+  expect_true(all(is.na(flag_shared_area_map$ln_sd)))
+  expect_equal(as.integer(flag_shared_area_map$ln_sd_flag), c(1L, 2L, 1L, 2L))
 })
 
 test_that("RW/AR1 spatiotemporal type maps rho parameters appropriately", {
@@ -219,7 +245,7 @@ test_that("RW/AR1 spatiotemporal type maps rho parameters appropriately", {
     n_f = 2L,
     pop_spatiotemporal_type = "rw",
     q_diffs_time = "off",
-    obs_sd = "shared"
+    obs_sd_flag = "shared"
   )
   expect_true(all(is.na(rw_map$transf_rho_1)))
   expect_true(all(is.na(rw_map$transf_rho_2)))
@@ -229,7 +255,7 @@ test_that("RW/AR1 spatiotemporal type maps rho parameters appropriately", {
     n_f = 2L,
     pop_spatiotemporal_type = "ar1",
     q_diffs_time = "off",
-    obs_sd = "shared"
+    obs_sd_flag = "shared"
   )
   expect_null(ar1_map[["transf_rho_1", exact = TRUE]])
   expect_null(ar1_map[["transf_rho_2", exact = TRUE]])
@@ -265,7 +291,7 @@ test_that("observation-SD and AR1 spatiotemporal settings are reported by TMB", 
       formula = cpue ~ 1,
       data_utm = data_utm,
       mesh = mesh,
-      obs_sd = "flag",
+      obs_sd_flag = "flag",
       q_diffs_time = "off",
       q_diffs_spatial = "off",
       control = list(eval.max = 200, iter.max = 200),
@@ -286,7 +312,7 @@ test_that("observation-SD and AR1 spatiotemporal settings are reported by TMB", 
       data_utm = data_utm,
       mesh = mesh,
       pop_spatiotemporal_type = "ar1",
-      obs_sd = "shared",
+      obs_sd_flag = "shared",
       q_diffs_time = "off",
       q_diffs_spatial = "off",
       control = list(eval.max = 200, iter.max = 200),

@@ -57,13 +57,15 @@
 }
 
 .make_map_intCPUE <- function(parameters, n_f,
-                              obs_sd = c("shared","flag"),
+                              obs_sd_flag = c("shared", "flag"),
+                              obs_sd_area = c("area", "shared"),
                               pop_spatiotemporal_type = c("rw", "ar1"),
                               q_diffs_time = c("on","off"),
                               has_tf = NULL,
                               estimable_flag = NULL) {
   q_diffs_time <- match.arg(q_diffs_time)
-  obs_sd <- match.arg(obs_sd)
+  obs_sd_flag <- match.arg(obs_sd_flag)
+  obs_sd_area <- match.arg(obs_sd_area)
   pop_spatiotemporal_type <- match.arg(pop_spatiotemporal_type)
   
   map <- list()
@@ -72,13 +74,23 @@
   # ---------------------------------------------------------
   # Observation SD
   # ---------------------------------------------------------
-  if (obs_sd == "shared") {
+  if (obs_sd_flag == "shared") {
     if (has_param("ln_sd_flag")) {
       map$ln_sd_flag <- factor(rep(NA, length(parameters$ln_sd_flag)))
+    }
+    if (obs_sd_area == "shared" && has_param("ln_sd")) {
+      map$ln_sd <- factor(rep(1L, length(parameters$ln_sd)))
     }
   } else {
     if (has_param("ln_sd")) {
       map$ln_sd <- factor(rep(NA, length(parameters$ln_sd)))
+    }
+    if (obs_sd_area == "shared" && has_param("ln_sd_flag")) {
+      n_flag_sd <- nrow(parameters$ln_sd_flag)
+      n_area_sd <- ncol(parameters$ln_sd_flag)
+      if (n_flag_sd > 0L && n_area_sd > 0L) {
+        map$ln_sd_flag <- factor(rep(seq_len(n_flag_sd), times = n_area_sd))
+      }
     }
   }
 

@@ -52,8 +52,13 @@ NULL
 #' @param pop_spatiotemporal_type `"rw"` or `"ar1"`. Controls whether the
 #'   always-on spatiotemporal population field follows a random-walk or AR1
 #'   evolution over time.
-#' @param obs_sd `"shared"` or `"flag"`. If `"flag"`, the positive-catch
-#'   lognormal observation SD is estimated separately for each flag.
+#' @param obs_sd_flag `"shared"` or `"flag"`. Controls whether the
+#'   positive-catch lognormal observation SD is shared across flags or
+#'   estimated separately for each flag.
+#' @param obs_sd_area `"area"` or `"shared"`. Controls whether the
+#'   positive-catch lognormal observation SD is estimated separately by area
+#'   or shared across areas. The default `"area"` preserves the historical
+#'   package behavior.
 #' @param control Control list passed to [stats::nlminb()].
 #' @param ncores Optional integer. If provided, sets the number of OpenMP threads. Passed to [TMB::openmp()].
 #' @param ... Passed to [intCPUEextra::make_data()] (for example, `area_scale`).
@@ -83,7 +88,8 @@ intCPUE <- function(
     q_diffs_time = c("on", "off"),
     q_diffs_spatial = c("on", "off"),
     pop_spatiotemporal_type = c("rw", "ar1"),
-    obs_sd = c("shared", "flag"),
+    obs_sd_flag = c("shared", "flag"),
+    obs_sd_area = c("area", "shared"),
     control = list(eval.max = 1e5, iter.max = 1e5),
     ncores = NULL,
     ...,
@@ -95,7 +101,8 @@ intCPUE <- function(
   q_diffs_time <- match.arg(q_diffs_time)
   q_diffs_spatial <- match.arg(q_diffs_spatial)
   pop_spatiotemporal_type <- match.arg(pop_spatiotemporal_type)
-  obs_sd <- match.arg(obs_sd)
+  obs_sd_flag <- match.arg(obs_sd_flag)
+  obs_sd_area <- match.arg(obs_sd_area)
   restart_max <- .validate_nonneg_count(restart_max, "restart_max")
   newton_max <- .validate_nonneg_count(newton_max, "newton_max")
   coord_max <- .validate_nonneg_count(coord_max, "coord_max")
@@ -141,7 +148,7 @@ intCPUE <- function(
   data_tmb$use_q_diffs_spatial <- as.integer(q_diffs_spatial == "on" && n_f > 1L)
   data_tmb$use_pop_spatiotemporal_rw <- as.integer(pop_spatiotemporal_type == "rw")
   data_tmb$use_pop_spatiotemporal_ar1 <- as.integer(pop_spatiotemporal_type == "ar1")
-  data_tmb$use_flag_sd <- as.integer(obs_sd == "flag" && n_f > 0L)
+  data_tmb$use_flag_sd <- as.integer(obs_sd_flag == "flag" && n_f > 0L)
 
   has_tf <- NULL
   flag_t_constraint <- NULL
@@ -216,7 +223,8 @@ intCPUE <- function(
   map <- .make_map_intCPUE(
     parameters = parameters,
     n_f = n_f,
-    obs_sd = obs_sd,
+    obs_sd_flag = obs_sd_flag,
+    obs_sd_area = obs_sd_area,
     pop_spatiotemporal_type = pop_spatiotemporal_type,
     q_diffs_time = q_diffs_time,
     has_tf = has_tf,
@@ -309,7 +317,8 @@ intCPUE <- function(
       pop_spatiotemporal_type = pop_spatiotemporal_type,
       q_diffs_time = q_diffs_time,
       q_diffs_spatial = q_diffs_spatial,
-      obs_sd = obs_sd,
+      obs_sd_flag = obs_sd_flag,
+      obs_sd_area = obs_sd_area,
       DLL = DLL,
       ncores = ncores,
       restart_max = restart_max,

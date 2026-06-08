@@ -227,7 +227,8 @@ fit <- intCPUE(
   mesh = mesh,
   q_diffs_time = "off",  
   q_diffs_spatial = "off",
-  obs_sd = "shared",
+  obs_sd_flag = "shared",
+  obs_sd_area = "area",
   ncores = ncores
 )
 ```
@@ -250,7 +251,8 @@ fit <- intCPUE(
   pop_spatiotemporal_type = "rw",
   q_diffs_time = "on",
   q_diffs_spatial = "on",
-  obs_sd = "shared"
+  obs_sd_flag = "shared",
+  obs_sd_area = "shared"
 )
 ```
 
@@ -276,9 +278,13 @@ For the reference fishery (`flagid = 0`), the `q_diffs_*` terms are constrained 
 
 ### Observation error
 
-* `obs_sd = "shared"` uses one lognormal observation SD across all flags
+* `obs_sd_flag = "shared"` uses one lognormal observation SD across all flags
 
-* `obs_sd = "flag"` estimates one lognormal observation SD for each flag
+* `obs_sd_flag = "flag"` estimates one lognormal observation SD for each flag
+
+* `obs_sd_area = "area"` estimates observation SD separately by area
+
+* `obs_sd_area = "shared"` uses the same observation SD across areas
 
 ## Getting index with bias correction
 
