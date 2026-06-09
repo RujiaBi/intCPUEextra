@@ -18,6 +18,7 @@ intCPUE(
   pop_spatiotemporal_type = c("rw", "ar1"),
   obs_sd_flag = c("shared", "flag"),
   obs_sd_area = c("area", "shared"),
+  t_sd = NULL,
   control = list(eval.max = 1e+05, iter.max = 1e+05),
   ncores = NULL,
   ...,
@@ -83,6 +84,11 @@ estimated separately for each flag.}
 positive-catch lognormal observation SD is estimated separately by area
 or shared across areas. The default \code{"area"} preserves the historical
 package behavior.}
+
+\item{t_sd}{Optional positive scalar. Only used when \code{formula_population}
+contains \code{f(tid)}. The default \code{NULL} estimates the random time-effect
+standard deviation; a numeric value (for example \code{10}) fixes that standard
+deviation at the supplied value.}
 
 \item{control}{Control list passed to \code{\link[stats:nlminb]{stats::nlminb()}}.}
 

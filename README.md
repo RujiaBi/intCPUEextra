@@ -206,6 +206,8 @@ Both encounter and positive components include:
 
 `formula_population` adds smooth covariates that affect the latent population surface and therefore also enter projection. When population covariates are not uniquely defined within each extrapolation cell, provide them explicitly through `projection_data`. If they also vary over time, include a `tid` column in `projection_data` so the projection covariates are matched by grid cell and time.
 
+Use `formula_population = ~ f(tid)` to replace the default fixed `tid` effect with an intercept plus random `tid` effect. With this setting, `t_sd = NULL` estimates the shared random-time standard deviation, while a numeric value such as `t_sd = 10` fixes that standard deviation. In multi-area mode, population smooths are still unsupported, but `~ f(tid)` is allowed.
+
 The legacy `formula = ...` interface is still supported and is treated as `formula_catchability = ...`.
 
 ### `projection_data` format

@@ -159,6 +159,71 @@ test_that("make_data skips dedicated flag mesh objects when q_diffs_spatial is o
   expect_length(prep$data$matern_sigma_flag, 0L)
 })
 
+test_that("formula_population f(tid) requests random time effects", {
+  skip_if_not_installed("sf")
+  skip_if_not_installed("fmesher")
+
+  data_input <- data.frame(
+    cpue = c(1.2, 0, 0.8, 1.1, 0, 0.7, 0.9, 0),
+    encounter = c(1L, 0L, 1L, 1L, 0L, 1L, 1L, 0L),
+    lon = c(150.0, 150.1, 150.2, 150.3, 160.0, 160.1, 160.2, 160.3),
+    lat = c(40.0, 40.0, 40.1, 40.1, 35.0, 35.0, 35.1, 35.1),
+    vesid = rep(0:1, 4),
+    tid = rep(0:1, each = 4),
+    flagid = rep(c(0L, 1L), 4),
+    region = rep(c("A", "B"), 4)
+  )
+
+  utm <- make_utm(data_input, utm_zone = NULL, coord_scale = "auto")
+  data_utm <- utm$data_utm
+  area_levels <- unique(as.character(data_utm$region))
+  mesh <- setNames(
+    lapply(area_levels, function(a) {
+      make_mesh(
+        data_utm[data_utm$region == a, ],
+        xy_cols = c("utm_x_scale", "utm_y_scale"),
+        type = "cutoff",
+        cutoff = 0.2
+      )
+    }),
+    area_levels
+  )
+
+  prep <- make_data(
+    data_utm = data_utm,
+    mesh = mesh,
+    area_col = "region",
+    formula_population = ~ f(tid),
+    q_diffs_spatial = "off"
+  )
+
+  expect_equal(prep$data$use_random_tid_effect, 1L)
+  expect_equal(prep$data$has_smooths_pop, 0L)
+  expect_equal(prep$smooth_info$population$use_random_tid_effect, TRUE)
+
+  expect_error(
+    make_data(
+      data_utm = data_utm,
+      mesh = mesh,
+      area_col = "region",
+      formula_population = ~ tid,
+      q_diffs_spatial = "off"
+    ),
+    "already included by default"
+  )
+
+  expect_error(
+    make_data(
+      data_utm = data_utm,
+      mesh = mesh,
+      area_col = "region",
+      formula_population = ~ f(season),
+      q_diffs_spatial = "off"
+    ),
+    "Only `f\\(tid\\)`"
+  )
+})
+
 test_that("observation-SD mapping is honored", {
   parameters <- intCPUEextra:::.make_parameters_intCPUE(
     n_a = 2L,
@@ -186,6 +251,36 @@ test_that("observation-SD mapping is honored", {
 
   expect_true(all(is.na(map$ln_sd)))
   expect_null(map$ln_sd_flag)
+  expect_true(all(is.na(map$pop_intercept)))
+  expect_true(all(is.na(map$t_ln_std_dev)))
+
+  random_tid_map <- intCPUEextra:::.make_map_intCPUE(
+    parameters = parameters,
+    n_f = 2L,
+    pop_spatiotemporal_type = "rw",
+    q_diffs_time = "off",
+    obs_sd_flag = "shared",
+    obs_sd_area = "area",
+    use_random_tid_effect = TRUE,
+    fix_t_sd = FALSE
+  )
+
+  expect_null(random_tid_map[["pop_intercept", exact = TRUE]])
+  expect_null(random_tid_map[["t_ln_std_dev", exact = TRUE]])
+
+  fixed_t_sd_map <- intCPUEextra:::.make_map_intCPUE(
+    parameters = parameters,
+    n_f = 2L,
+    pop_spatiotemporal_type = "rw",
+    q_diffs_time = "off",
+    obs_sd_flag = "shared",
+    obs_sd_area = "area",
+    use_random_tid_effect = TRUE,
+    fix_t_sd = TRUE
+  )
+
+  expect_null(fixed_t_sd_map[["pop_intercept", exact = TRUE]])
+  expect_true(all(is.na(fixed_t_sd_map$t_ln_std_dev)))
 
   shared_flag_area_map <- intCPUEextra:::.make_map_intCPUE(
     parameters = parameters,
@@ -305,6 +400,42 @@ test_that("observation-SD and AR1 spatiotemporal settings are reported by TMB", 
   expect_equal(as.integer(rep_flag_sd$use_pop_spatiotemporal_ar1), 0L)
   expect_equal(as.integer(rep_flag_sd$use_flag_sd), 1L)
   expect_length(rep_flag_sd$sd_flag, fit_flag_sd$data_tmb$n_f)
+
+  expect_error(
+    intCPUE(
+      formula = cpue ~ 1,
+      data_utm = data_utm,
+      mesh = mesh,
+      t_sd = 10,
+      q_diffs_time = "off",
+      q_diffs_spatial = "off",
+      silent = TRUE
+    ),
+    "`t_sd` can only be used"
+  )
+
+  fit_random_tid <- suppressWarnings(
+    intCPUE(
+      formula = cpue ~ 1,
+      formula_population = ~ f(tid),
+      data_utm = data_utm,
+      mesh = mesh,
+      t_sd = 10,
+      q_diffs_time = "off",
+      q_diffs_spatial = "off",
+      control = list(eval.max = 200, iter.max = 200),
+      silent = TRUE,
+      restart_max = 0L,
+      newton_max = 0L,
+      coord_max = 0L
+    )
+  )
+
+  rep_random_tid <- fit_random_tid$obj$report()
+  expect_equal(as.integer(rep_random_tid$use_random_tid_effect), 1L)
+  expect_equal(as.integer(rep_random_tid$fix_t_sd), 1L)
+  expect_equal(as.numeric(rep_random_tid$t_std_dev), 10)
+  expect_true(all(c("yq_t_1", "yq_t_2") %in% fit_random_tid$random))
 
   fit_ar1 <- suppressWarnings(
     intCPUE(

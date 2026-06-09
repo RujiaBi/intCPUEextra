@@ -30,7 +30,8 @@ smooth terms that affect catchability only.}
 
 \item{formula_population}{Optional one-sided or two-sided formula defining
 smooth terms that affect both the observation model and the projected
-population density surface.}
+population density surface. Include \code{f(tid)} to replace the default fixed
+time effect with an intercept plus random time effect.}
 
 \item{projection_data}{Optional data.frame giving projection-grid covariates
 for \code{formula_population}. It must contain \code{utm_x_scale} and \code{utm_y_scale}
@@ -54,7 +55,8 @@ identifies multiple areas, \code{mesh} must be a named list with one mesh per
 area. Multiple areas share vessel effects and non-spatial flag effects,
 while temporal/spatial population components remain area-specific.
 Population smooths and custom \code{projection_data} are currently unsupported
-in multi-area mode.}
+in multi-area mode, except that \code{formula_population = ~ f(tid)} is allowed
+to request random time effects.}
 
 \item{flag_mesh}{Optional dedicated mesh for the shared flag-specific
 spatial field (\code{flag_s}). When fitting multiple areas and enabling

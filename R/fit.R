@@ -59,6 +59,10 @@ NULL
 #'   positive-catch lognormal observation SD is estimated separately by area
 #'   or shared across areas. The default `"area"` preserves the historical
 #'   package behavior.
+#' @param t_sd Optional positive scalar. Only used when `formula_population`
+#'   contains `f(tid)`. The default `NULL` estimates the random time-effect
+#'   standard deviation; a numeric value (for example `10`) fixes that standard
+#'   deviation at the supplied value.
 #' @param control Control list passed to [stats::nlminb()].
 #' @param ncores Optional integer. If provided, sets the number of OpenMP threads. Passed to [TMB::openmp()].
 #' @param ... Passed to [intCPUEextra::make_data()] (for example, `area_scale`).
@@ -90,6 +94,7 @@ intCPUE <- function(
     pop_spatiotemporal_type = c("rw", "ar1"),
     obs_sd_flag = c("shared", "flag"),
     obs_sd_area = c("area", "shared"),
+    t_sd = NULL,
     control = list(eval.max = 1e5, iter.max = 1e5),
     ncores = NULL,
     ...,
@@ -103,6 +108,15 @@ intCPUE <- function(
   pop_spatiotemporal_type <- match.arg(pop_spatiotemporal_type)
   obs_sd_flag <- match.arg(obs_sd_flag)
   obs_sd_area <- match.arg(obs_sd_area)
+  if (is.character(t_sd) && length(t_sd) == 1L && identical(tolower(t_sd), "null")) {
+    t_sd <- NULL
+  }
+  if (!is.null(t_sd)) {
+    if (!is.numeric(t_sd) || length(t_sd) != 1L || !is.finite(t_sd) || t_sd <= 0) {
+      stop("`t_sd` must be NULL or a positive finite numeric scalar.", call. = FALSE)
+    }
+    t_sd <- as.numeric(t_sd)
+  }
   restart_max <- .validate_nonneg_count(restart_max, "restart_max")
   newton_max <- .validate_nonneg_count(newton_max, "newton_max")
   coord_max <- .validate_nonneg_count(coord_max, "coord_max")
@@ -135,6 +149,12 @@ intCPUE <- function(
   )
   
   data_tmb <- prep$data
+  use_random_tid_effect <- isTRUE(as.integer(data_tmb$use_random_tid_effect) == 1L)
+  if (!use_random_tid_effect && !is.null(t_sd)) {
+    stop("`t_sd` can only be used when `formula_population` contains `f(tid)`.", call. = FALSE)
+  }
+  data_tmb$fix_t_sd <- as.integer(use_random_tid_effect && !is.null(t_sd))
+  data_tmb$t_sd <- if (is.null(t_sd)) 1.0 else t_sd
   
   # ---- 2) Defensive checks (catch mismatches early) ----
   n_a <- data_tmb$n_a
@@ -225,6 +245,8 @@ intCPUE <- function(
     n_f = n_f,
     obs_sd_flag = obs_sd_flag,
     obs_sd_area = obs_sd_area,
+    use_random_tid_effect = use_random_tid_effect,
+    fix_t_sd = !is.null(t_sd),
     pop_spatiotemporal_type = pop_spatiotemporal_type,
     q_diffs_time = q_diffs_time,
     has_tf = has_tf,
@@ -254,6 +276,7 @@ intCPUE <- function(
   # Smooth random coeffs
   if (has_smooths_catch && sum_k_catch > 0L) random <- c(random, "b_smooth_catch")
   if (has_smooths_pop && sum_k_pop > 0L) random <- c(random, "b_smooth_pop")
+  if (use_random_tid_effect) random <- c(random, "yq_t_1", "yq_t_2")
   
   random <- unique(random)
   
@@ -319,6 +342,8 @@ intCPUE <- function(
       q_diffs_spatial = q_diffs_spatial,
       obs_sd_flag = obs_sd_flag,
       obs_sd_area = obs_sd_area,
+      t_sd = t_sd,
+      use_random_tid_effect = use_random_tid_effect,
       DLL = DLL,
       ncores = ncores,
       restart_max = restart_max,

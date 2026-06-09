@@ -105,6 +105,9 @@ Type objective_function<Type>::operator() () {
   DATA_INTEGER(use_q_diffs_time);
   DATA_INTEGER(use_q_diffs_spatial);
   DATA_INTEGER(use_flag_sd);
+  DATA_INTEGER(use_random_tid_effect);
+  DATA_INTEGER(fix_t_sd);
+  DATA_SCALAR(t_sd);
 
   DATA_VECTOR(b_i);
   DATA_IVECTOR(e_i);
@@ -169,6 +172,8 @@ Type objective_function<Type>::operator() () {
   PARAMETER(ves_ln_std_dev_2);
   PARAMETER_MATRIX(yq_t_1);
   PARAMETER_MATRIX(yq_t_2);
+  PARAMETER_MATRIX(pop_intercept);
+  PARAMETER(t_ln_std_dev);
   PARAMETER_VECTOR(omega_s_1);
   PARAMETER_VECTOR(omega_s_2);
   PARAMETER_MATRIX(epsilon_st_1);
@@ -211,6 +216,10 @@ Type objective_function<Type>::operator() () {
   Type flag_t_std_dev_1 = exp(flag_t_ln_std_dev_1);
   Type flag_t_std_dev_2 = exp(flag_t_ln_std_dev_2);
 #endif
+  Type t_std_dev = exp(t_ln_std_dev);
+  if (fix_t_sd == 1) {
+    t_std_dev = t_sd;
+  }
 
   matrix<Type> sd_flag(n_f, n_a);
   for (int a = 0; a < n_a; a++) {
@@ -438,6 +447,15 @@ Type objective_function<Type>::operator() () {
     nll -= dnorm(ves_v_2(i), Type(0.0), ves_std_dev_2, true);
   }
 
+  if (use_random_tid_effect == 1) {
+    for (int a = 0; a < n_a; a++) {
+      for (int t = 0; t < n_t; t++) {
+        nll -= dnorm(yq_t_1(t, a), Type(0.0), t_std_dev, true);
+        nll -= dnorm(yq_t_2(t, a), Type(0.0), t_std_dev, true);
+      }
+    }
+  }
+
   s_effect_1 = A_is * omega_s_1;
   s_effect_2 = A_is * omega_s_2;
   s_effect_proj_1 = A_gs * omega_s_1;
@@ -491,6 +509,12 @@ Type objective_function<Type>::operator() () {
 
     Type yq_effect_1 = yq_t_1(tid, aid);
     Type yq_effect_2 = yq_t_2(tid, aid);
+    Type pop_intercept_1 = Type(0.0);
+    Type pop_intercept_2 = Type(0.0);
+    if (use_random_tid_effect == 1) {
+      pop_intercept_1 = pop_intercept(aid, 0);
+      pop_intercept_2 = pop_intercept(aid, 1);
+    }
     Type flag_effect_1 = Type(0.0);
     Type flag_effect_2 = Type(0.0);
     if (fid > 0 && n_f > 1) {
@@ -515,9 +539,9 @@ Type objective_function<Type>::operator() () {
     }
 #endif
 
-    Type eta1 = ves_effect_1 + yq_effect_1 + flag_effect_1 + flag_t_effect_1 + flag_s_effect_1(i) +
+    Type eta1 = ves_effect_1 + pop_intercept_1 + yq_effect_1 + flag_effect_1 + flag_t_effect_1 + flag_s_effect_1(i) +
       s_effect_1(i) + st_effect_1(i) + eta_smooth_catch_1(i) + eta_smooth_pop_i_1(i);
-    Type eta2 = ves_effect_2 + yq_effect_2 + flag_effect_2 + flag_t_effect_2 + flag_s_effect_2(i) +
+    Type eta2 = ves_effect_2 + pop_intercept_2 + yq_effect_2 + flag_effect_2 + flag_t_effect_2 + flag_s_effect_2(i) +
       s_effect_2(i) + st_effect_2(i) + eta_smooth_catch_2(i) + eta_smooth_pop_i_2(i);
 
     Type log_one_minus_p = -exp(eta1);
@@ -549,14 +573,20 @@ Type objective_function<Type>::operator() () {
   int g_start = 0;
   for (int a = 0; a < n_a; a++) {
     int ng = n_g_area(a);
+    Type pop_intercept_proj_1 = Type(0.0);
+    Type pop_intercept_proj_2 = Type(0.0);
+    if (use_random_tid_effect == 1) {
+      pop_intercept_proj_1 = pop_intercept(a, 0);
+      pop_intercept_proj_2 = pop_intercept(a, 1);
+    }
     for (int t = 0; t < n_t; t++) {
       Type yq_effect_proj_1 = yq_t_1(t, a);
       Type yq_effect_proj_2 = yq_t_2(t, a);
       for (int g_local = 0; g_local < ng; g_local++) {
         int g = g_start + g_local;
         int gt = g + n_g * t;
-        Type eta1_proj = yq_effect_proj_1 + s_effect_proj_1(g) + st_effect_proj_1(g, t) + eta_smooth_pop_g_1(gt);
-        Type eta2_proj = yq_effect_proj_2 + s_effect_proj_2(g) + st_effect_proj_2(g, t) + eta_smooth_pop_g_2(gt);
+        Type eta1_proj = pop_intercept_proj_1 + yq_effect_proj_1 + s_effect_proj_1(g) + st_effect_proj_1(g, t) + eta_smooth_pop_g_1(gt);
+        Type eta2_proj = pop_intercept_proj_2 + yq_effect_proj_2 + s_effect_proj_2(g) + st_effect_proj_2(g, t) + eta_smooth_pop_g_2(gt);
         Type cpue = exp(eta1_proj + eta2_proj);
         cpue_density(g, t) = cpue;
         mu_total(t, a) += cpue * area_g(g);
@@ -585,6 +615,9 @@ Type objective_function<Type>::operator() () {
   REPORT(use_q_diffs_time);
   REPORT(use_q_diffs_spatial);
   REPORT(use_flag_sd);
+  REPORT(use_random_tid_effect);
+  REPORT(fix_t_sd);
+  REPORT(t_std_dev);
   REPORT(sd_flag);
   REPORT(eta_hat_encounter_i);
   REPORT(eta_hat_positive_i);

@@ -59,6 +59,8 @@
 .make_map_intCPUE <- function(parameters, n_f,
                               obs_sd_flag = c("shared", "flag"),
                               obs_sd_area = c("area", "shared"),
+                              use_random_tid_effect = FALSE,
+                              fix_t_sd = FALSE,
                               pop_spatiotemporal_type = c("rw", "ar1"),
                               q_diffs_time = c("on","off"),
                               has_tf = NULL,
@@ -91,6 +93,22 @@
       if (n_flag_sd > 0L && n_area_sd > 0L) {
         map$ln_sd_flag <- factor(rep(seq_len(n_flag_sd), times = n_area_sd))
       }
+    }
+  }
+
+  # Default model keeps yq_t_* as fixed time effects and does not use the
+  # population intercept or random-time SD. With formula_population = ~ f(tid),
+  # yq_t_* themselves become random time effects and pop_intercept is estimated.
+  if (isTRUE(use_random_tid_effect)) {
+    if (isTRUE(fix_t_sd) && has_param("t_ln_std_dev")) {
+      map$t_ln_std_dev <- factor(NA)
+    }
+  } else {
+    if (has_param("pop_intercept")) {
+      map$pop_intercept <- factor(rep(NA, length(parameters$pop_intercept)))
+    }
+    if (has_param("t_ln_std_dev")) {
+      map$t_ln_std_dev <- factor(NA)
     }
   }
 

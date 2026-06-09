@@ -117,6 +117,8 @@
     # NOTE: name suggests "year-quarter"; ensure semantics match data.
     yq_t_1 = empty_mat(n_t, n_a),
     yq_t_2 = empty_mat(n_t, n_a),
+    pop_intercept = empty_mat(n_a, 2L),
+    t_ln_std_dev = 0.0,
     
     # ==========================================================
     # Spatial + spatiotemporal random fields (SPDE vertices)

@@ -22,6 +22,56 @@
   )
 }
 
+.parse_population_tid_formula <- function(formula_population) {
+  out <- list(
+    formula_population = formula_population,
+    use_random_tid_effect = FALSE
+  )
+
+  if (is.null(formula_population)) {
+    return(out)
+  }
+
+  terms <- all_terms(formula_population)
+  if (!length(terms)) {
+    out$formula_population <- NULL
+    return(out)
+  }
+
+  fixed_tid_terms <- terms[terms %in% c("tid", "factor(tid)", "as.factor(tid)")]
+  if (length(fixed_tid_terms)) {
+    stop(
+      "`tid` is already included by default as a fixed time effect. ",
+      "Remove `tid` from `formula_population`, or use `f(tid)` to request a random time effect.",
+      call. = FALSE
+    )
+  }
+
+  random_terms <- grep("^f\\(", terms, value = TRUE)
+  unsupported_random_terms <- setdiff(random_terms, "f(tid)")
+  if (length(unsupported_random_terms)) {
+    stop(
+      "Only `f(tid)` is currently supported in `formula_population` for random population factors. ",
+      "Unsupported term(s): ",
+      paste(unsupported_random_terms, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  out$use_random_tid_effect <- "f(tid)" %in% random_terms
+  remaining_terms <- setdiff(terms, "f(tid)")
+  if (!length(remaining_terms)) {
+    out$formula_population <- NULL
+    return(out)
+  }
+
+  out$formula_population <- stats::as.formula(
+    paste("~", paste(remaining_terms, collapse = " + ")),
+    env = environment(formula_population)
+  )
+  out
+}
+
 .normalize_smoother_output <- function(sm, n_rows) {
   if (!isTRUE(sm$has_smooths)) {
     return(list(
@@ -377,7 +427,8 @@
 #'   smooth terms that affect catchability only.
 #' @param formula_population Optional one-sided or two-sided formula defining
 #'   smooth terms that affect both the observation model and the projected
-#'   population density surface.
+#'   population density surface. Include `f(tid)` to replace the default fixed
+#'   time effect with an intercept plus random time effect.
 #' @param projection_data Optional data.frame giving projection-grid covariates
 #'   for `formula_population`. It must contain `utm_x_scale` and `utm_y_scale`
 #'   matching the extrapolation grid. If it also contains `tid`, it is treated
@@ -398,7 +449,8 @@
 #'   area. Multiple areas share vessel effects and non-spatial flag effects,
 #'   while temporal/spatial population components remain area-specific.
 #'   Population smooths and custom `projection_data` are currently unsupported
-#'   in multi-area mode.
+#'   in multi-area mode, except that `formula_population = ~ f(tid)` is allowed
+#'   to request random time effects.
 #' @param flag_mesh Optional dedicated mesh for the shared flag-specific
 #'   spatial field (`flag_s`). When fitting multiple areas and enabling
 #'   `q_diffs_spatial`, supply a single full-domain mesh here.
@@ -430,6 +482,9 @@ make_data <- function(
   )
   formula_catchability <- formulas$formula_catchability
   formula_population <- formulas$formula_population
+  population_formula_info <- .parse_population_tid_formula(formula_population)
+  formula_population <- population_formula_info$formula_population
+  use_random_tid_effect <- population_formula_info$use_random_tid_effect
 
   data_utm <- as.data.frame(data_utm)
 
@@ -629,6 +684,7 @@ make_data <- function(
       n_i_area = as.integer(n_i),
       n_g_area = as.integer(n_g),
       n_s_area = as.integer(spde_aniso$n_s),
+      use_random_tid_effect = as.integer(use_random_tid_effect),
 
       b_i = data_utm_single$cpue,
       e_i = data_utm_single$encounter,
@@ -695,7 +751,8 @@ make_data <- function(
           sm_dims = sm_pop_obs$sm_dims,
           b_smooth_start = sm_pop_obs$b_smooth_start,
           K_smooth = ncol(sm_pop_obs$Xs),
-          n_smooth = length(sm_pop_obs$Zs)
+          n_smooth = length(sm_pop_obs$Zs),
+          use_random_tid_effect = use_random_tid_effect
         )
       ),
       area_levels = area_levels
@@ -846,6 +903,7 @@ make_data <- function(
     n_g_area = as.integer(n_g_area),
     n_s_area = as.integer(n_s_area),
     n_s_flag = n_s_flag,
+    use_random_tid_effect = as.integer(use_random_tid_effect),
 
     b_i = data_stack$cpue,
     e_i = as.integer(data_stack$encounter),
@@ -911,7 +969,8 @@ make_data <- function(
         sm_dims = integer(0),
         b_smooth_start = integer(0),
         K_smooth = 0L,
-        n_smooth = 0L
+        n_smooth = 0L,
+        use_random_tid_effect = use_random_tid_effect
       )
     ),
     area_levels = area_levels

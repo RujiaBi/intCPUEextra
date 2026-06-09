@@ -58,6 +58,7 @@
   req <- c(
     "n_a","n_i","n_t","n_v","n_f","n_g",
     "n_i_area","n_g_area","n_s_area","n_s_flag",
+    "use_random_tid_effect","fix_t_sd","t_sd",
     "b_i","e_i","t_i","v_i","f_i",
     "area_i","has_tf","area_g",
     "A_is","A_gs","spdes",
@@ -151,6 +152,16 @@
   }
   if (length(data_tmb$area_g) != data_tmb$n_g) {
     stop("`area_g` must have length `n_g`.", call. = FALSE)
+  }
+  if (length(data_tmb$use_random_tid_effect) != 1L ||
+      !(as.integer(data_tmb$use_random_tid_effect) %in% c(0L, 1L))) {
+    stop("`use_random_tid_effect` must be 0/1.", call. = FALSE)
+  }
+  if (length(data_tmb$fix_t_sd) != 1L || !(as.integer(data_tmb$fix_t_sd) %in% c(0L, 1L))) {
+    stop("`fix_t_sd` must be 0/1.", call. = FALSE)
+  }
+  if (length(data_tmb$t_sd) != 1L || !is.finite(data_tmb$t_sd) || data_tmb$t_sd <= 0) {
+    stop("`t_sd` must be a positive finite scalar.", call. = FALSE)
   }
 
   n_s_total <- sum(data_tmb$n_s_area)
@@ -274,6 +285,12 @@
   }
   if (!is.null(parameters$yq_t_2) && !identical(dim(parameters$yq_t_2), c(n_t, n_a))) {
     stop("`yq_t_2` must have dimension `n_t x n_a`.", call. = FALSE)
+  }
+  if (!is.null(parameters$pop_intercept) && !identical(dim(parameters$pop_intercept), c(n_a, 2L))) {
+    stop("`pop_intercept` must have dimension `n_a x 2`.", call. = FALSE)
+  }
+  if (!is.null(parameters$t_ln_std_dev) && length(parameters$t_ln_std_dev) != 1L) {
+    stop("`t_ln_std_dev` must have length 1.", call. = FALSE)
   }
 
   n_s_flag <- as.integer(data_tmb$n_s_flag)
